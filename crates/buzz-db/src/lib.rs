@@ -15,6 +15,12 @@ pub mod admin_moderation;
 pub mod api_token;
 /// Relay-scoped archived identity persistence (NIP-IA).
 pub mod archived_identities;
+/// Optional Bluplai room-scoped media ACL persistence.
+pub mod bluplai_media_acl;
+/// Operator-authorized Bluplai desired-membership projection.
+pub mod bluplai_membership;
+/// Durable Bluplai-visible event outbox.
+pub mod bluplai_visible_outbox;
 /// Channel and membership persistence.
 pub mod channel;
 /// Direct message channel persistence.
@@ -2257,6 +2263,129 @@ impl Db {
             }
         }
         Ok(outcome)
+    }
+
+    /// Bind a verified upload hash to one Bluplai room.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn bind_bluplai_room_media(
+        &self,
+        community_id: CommunityId,
+        sha256: &[u8],
+        channel_id: Uuid,
+        uploader_pubkey: &[u8],
+        byte_size: i64,
+        content_type: Option<&str>,
+    ) -> Result<bool> {
+        bluplai_media_acl::bind_room_media(
+            &self.pool,
+            community_id,
+            sha256,
+            channel_id,
+            uploader_pubkey,
+            byte_size,
+            content_type,
+        )
+        .await
+    }
+
+    /// Return the protected room for a Bluplai-bound media hash.
+    pub async fn bluplai_protected_media_room(
+        &self,
+        community_id: CommunityId,
+        sha256: &[u8],
+    ) -> Result<Option<Uuid>> {
+        bluplai_media_acl::protected_media_room(&self.pool, community_id, sha256).await
+    }
+
+    /// Revalidate current room membership for protected media.
+    pub async fn can_read_bluplai_protected_media(
+        &self,
+        community_id: CommunityId,
+        sha256: &[u8],
+        reader_pubkey: &[u8],
+    ) -> Result<bool> {
+        bluplai_media_acl::can_read_protected_media(&self.pool, community_id, sha256, reader_pubkey)
+            .await
+    }
+
+    /// Apply one idempotent Bluplai desired-membership projection.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn project_bluplai_member(
+        &self,
+        community_id: CommunityId,
+        channel_id: Uuid,
+        member_pubkey: &[u8],
+        operation: &str,
+        role: channel::MemberRole,
+        operator_pubkey: &[u8],
+    ) -> Result<()> {
+        bluplai_membership::project_member(
+            &self.pool,
+            community_id,
+            channel_id,
+            member_pubkey,
+            operation,
+            role,
+            operator_pubkey,
+        )
+        .await
+    }
+
+    /// Atomically provision one private managed room.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn provision_bluplai_managed_room(
+        &self,
+        community_id: CommunityId,
+        channel_id: Uuid,
+        name: &str,
+        disclosure_scope: &str,
+        owner_pubkey: &[u8],
+        member_pubkeys: &[Vec<u8>],
+    ) -> Result<bool> {
+        bluplai_membership::provision_managed_room(
+            &self.pool,
+            community_id,
+            channel_id,
+            name,
+            disclosure_scope,
+            owner_pubkey,
+            member_pubkeys,
+        )
+        .await
+    }
+
+    /// Claim a bounded batch of committed Bluplai-visible events.
+    pub async fn claim_bluplai_visible_events(
+        &self,
+        community_id: CommunityId,
+        limit: i64,
+    ) -> Result<Vec<bluplai_visible_outbox::ClaimedVisibleEvent>> {
+        bluplai_visible_outbox::claim_visible_events(&self.pool, community_id, limit).await
+    }
+
+    /// Mark a private channel as managed by the Bluplai integration.
+    pub async fn mark_bluplai_managed_room(
+        &self,
+        community_id: CommunityId,
+        channel_id: Uuid,
+        disclosure_scope: &str,
+    ) -> Result<()> {
+        bluplai_visible_outbox::mark_managed_room(
+            &self.pool,
+            community_id,
+            channel_id,
+            disclosure_scope,
+        )
+        .await
+    }
+
+    /// Mark one Bluplai-visible event consumed after its remote journal commit.
+    pub async fn complete_bluplai_visible_event(
+        &self,
+        community_id: CommunityId,
+        id: Uuid,
+    ) -> Result<()> {
+        bluplai_visible_outbox::complete_visible_event(&self.pool, community_id, id).await
     }
 
     /// Creates a new channel, bootstraps the creator as owner, and returns the record.

@@ -92,6 +92,22 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/operator/communities/transfer",
             post(api::operator::transfer_community),
         )
+        .route(
+            "/operator/bluplai/rooms",
+            post(api::operator::provision_bluplai_room),
+        )
+        .route(
+            "/operator/bluplai/memberships",
+            post(api::operator::project_bluplai_membership),
+        )
+        .route(
+            "/operator/bluplai/visible-events",
+            get(api::operator::claim_bluplai_visible_events),
+        )
+        .route(
+            "/operator/bluplai/visible-events/complete",
+            post(api::operator::complete_bluplai_visible_event),
+        )
         // Relay invites: mint (owner/admin) + claim (membership-gate exempt)
         .route("/api/invites", post(api::invites::mint_invite))
         .route("/api/join-policy", get(api::invites::join_policy))

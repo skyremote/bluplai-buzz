@@ -1272,6 +1272,11 @@ async fn insert_event_with_thread_metadata_tx(
                 }
             }
         }
+        // Bluplai-visible events are journaled in the same transaction as the
+        // event and thread metadata. A consumer crash can therefore replay the
+        // outbox without losing or double-notifying a committed message.
+        crate::bluplai_visible_outbox::append_visible_event_tx(tx, community_id, channel_id, event)
+            .await?;
     }
 
     Ok((
