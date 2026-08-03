@@ -47,3 +47,19 @@ Reconciliation advances `imported` to `reconciled` and also maps every legacy re
 latest imported message at or before that frontier; an unmappable cursor blocks
 cutover. Keep the source database and encrypted manifest intact through the
 rollback retention window.
+
+## Redaction and retirement evidence
+
+If a source message is deleted or redacted after import, emit and retain its
+signed tombstone, replace the legacy body with the deletion placeholder, mark
+the migration item/attachment mapping `redacted`, and preserve only the minimum
+source key/checksum/event ID required for integrity. Reconciliation must treat a
+redacted mapping as deliberate; it must never re-import the previous encrypted
+body or object from an older manifest/backup.
+
+The retirement preflight reports aggregate legacy rows, manifests, journal
+rows, unmapped objects, unresolved deep links, legal holds, open privacy work
+and runtime dependencies. Any non-zero blocker refuses retirement. The importer,
+source schema or recovery controls must not be removed in the same change that
+produces the report; destructive cleanup requires a later approved plan after
+the 30-day final-cohort stability window and a fresh restore rehearsal.

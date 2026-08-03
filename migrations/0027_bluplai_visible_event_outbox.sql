@@ -14,7 +14,7 @@ CREATE TABLE bluplai_managed_rooms (
 );
 
 CREATE TABLE bluplai_visible_event_outbox (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID NOT NULL DEFAULT gen_random_uuid(),
     community_id UUID NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
     channel_id UUID NOT NULL,
     event_id BYTEA NOT NULL,
@@ -30,6 +30,7 @@ CREATE TABLE bluplai_visible_event_outbox (
     attempts INT NOT NULL DEFAULT 0,
     last_error_code TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (community_id, id),
     UNIQUE (community_id, event_id),
     FOREIGN KEY (community_id, channel_id)
         REFERENCES channels (community_id, id) ON DELETE CASCADE,
@@ -40,7 +41,7 @@ CREATE TABLE bluplai_visible_event_outbox (
 );
 
 CREATE INDEX bluplai_visible_event_outbox_claim_idx
-    ON bluplai_visible_event_outbox (available_at, created_at)
+    ON bluplai_visible_event_outbox (community_id, available_at, created_at)
     WHERE consumed_at IS NULL;
 
 CREATE TABLE bluplai_room_media_acl (

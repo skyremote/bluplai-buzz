@@ -130,6 +130,14 @@ These signals are independent; do not collapse them into a single green light.
 | Migration | recorded schema head and operator job state | exact release head | block rollout, not unrelated API health |
 | AI bridge | separate Bluplai agent health | configured bridge ready | disable room AI without claiming relay failure |
 
+Bluplai also emits an aggregate `buzz_operational_snapshot` from its backend.
+The dashboard must page on dead-letter queues, acknowledged-event journal gaps,
+rollback watermark lag, migration blockers and agent `outcome_unknown`; warn on
+membership drift, backlog age/size and a burst of agent failures. These logs
+must not contain organisation/user IDs, public keys, event IDs, room names,
+message content, prompts or media URLs. `/health/buzz` and the aggregate snapshot
+are complementary: readiness alone does not prove durable queues are advancing.
+
 The relay's `/_readiness` currently covers Postgres and Redis, not S3, replica
 freshness, gateway, migration or AI. Bluplai's aggregate endpoint reports these
 separately and treats a disabled Buzz integration as disabled rather than making
@@ -162,3 +170,18 @@ chat operations rather than accepting unauditable or replayable requests.
 
 For backup, restore and signed-event recovery, follow
 [`BLUPLAI_BACKUP_RESTORE.md`](BLUPLAI_BACKUP_RESTORE.md).
+
+## Privacy and legacy retirement
+
+Signed deletion/tombstone events are part of the visible-event recovery
+journal. An older database/object restore must replay the post-backup privacy
+ledger before reads reopen, so recovery cannot resurrect a deleted body. Keep
+only the minimum event/checksum/audit evidence permitted by policy; never put
+message content, identity material or plaintext keys in support exports.
+
+Retiring Bluplai's legacy chat tables is outside normal Buzz operations. The
+preflight remains fail-closed until all organisations and the global control
+are Buzz-active, 30 days have elapsed since final activation, mappings and deep
+links reconcile, no legal hold or open privacy request remains, a fresh backup
+restore matches counts/hashes, and no production legacy dependency remains.
+A clean report permits a new reviewed plan; it does not execute a drop.

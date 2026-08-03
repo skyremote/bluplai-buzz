@@ -154,7 +154,7 @@ pub async fn claim_visible_events(
     let rows = sqlx::query(
         r#"
         WITH claimed AS (
-            SELECT id
+            SELECT community_id, id
             FROM bluplai_visible_event_outbox
             WHERE community_id = $1 AND consumed_at IS NULL
               AND available_at <= now()
@@ -166,7 +166,7 @@ pub async fn claim_visible_events(
         UPDATE bluplai_visible_event_outbox AS o
         SET claimed_at = now(), attempts = attempts + 1
         FROM claimed
-        WHERE o.id = claimed.id
+        WHERE o.community_id = claimed.community_id AND o.id = claimed.id
         RETURNING o.id, o.channel_id, o.event_id, o.event_created_at,
                   o.event_kind, o.author_pubkey, o.payload,
                   o.notification_class, o.source_class
@@ -229,7 +229,10 @@ mod tests {
         let pool = pool().await;
         let community_uuid = Uuid::new_v4();
         let community = CommunityId::from_uuid(community_uuid);
+        let other_community_uuid = Uuid::new_v4();
+        let other_community = CommunityId::from_uuid(other_community_uuid);
         let room = Uuid::new_v4();
+        let other_room = Uuid::new_v4();
         let member = vec![8_u8; 32];
         sqlx::query("INSERT INTO communities (id, host) VALUES ($1, $2)")
             .bind(community_uuid)
@@ -237,6 +240,15 @@ mod tests {
             .execute(&pool)
             .await
             .expect("insert community");
+        sqlx::query("INSERT INTO communities (id, host) VALUES ($1, $2)")
+            .bind(other_community_uuid)
+            .bind(format!(
+                "bluplai-outbox-{}.test",
+                other_community_uuid.simple()
+            ))
+            .execute(&pool)
+            .await
+            .expect("insert other community");
         provision_managed_room(
             &pool,
             community,
@@ -248,6 +260,17 @@ mod tests {
         )
         .await
         .expect("provision room");
+        provision_managed_room(
+            &pool,
+            other_community,
+            other_room,
+            "Other visible outbox",
+            "private",
+            &member,
+            std::slice::from_ref(&member),
+        )
+        .await
+        .expect("provision other room");
         let event = EventBuilder::new(Kind::Custom(9), "imported history")
             .tags([Tag::parse(["bluplai-source", "imported"]).expect("source tag")])
             .sign_with_keys(&Keys::generate())
@@ -268,6 +291,26 @@ mod tests {
             .await
             .expect("append in commit tx");
         committed.commit().await.expect("commit");
+        // The outbox row id is only unique inside a community. A malicious or
+        // unlucky collision must not allow one tenant's claim to lease another
+        // tenant's row.
+        sqlx::query(
+            r#"
+            INSERT INTO bluplai_visible_event_outbox
+                (id, community_id, channel_id, event_id, event_created_at,
+                 event_kind, author_pubkey, notification_class, source_class, payload)
+            SELECT id, $2, $3, event_id, event_created_at, event_kind,
+                   author_pubkey, notification_class, source_class, payload
+              FROM bluplai_visible_event_outbox
+             WHERE community_id=$1
+            "#,
+        )
+        .bind(community_uuid)
+        .bind(other_community_uuid)
+        .bind(other_room)
+        .execute(&pool)
+        .await
+        .expect("insert same outbox id in other community");
         let claimed = claim_visible_events(&pool, community, 50)
             .await
             .expect("claim event");
@@ -275,6 +318,14 @@ mod tests {
         assert_eq!(claimed[0].notification_class, "message");
         assert_eq!(claimed[0].source_class, "imported");
         assert_eq!(claimed[0].event_id, event.id.as_bytes().to_vec());
+        let other_claimed_at: Option<DateTime<Utc>> = sqlx::query_scalar(
+            "SELECT claimed_at FROM bluplai_visible_event_outbox WHERE community_id=$1",
+        )
+        .bind(other_community_uuid)
+        .fetch_one(&pool)
+        .await
+        .expect("read other claim state");
+        assert!(other_claimed_at.is_none());
         complete_visible_event(&pool, community, claimed[0].id)
             .await
             .expect("complete event");
@@ -283,13 +334,13 @@ mod tests {
             .expect("claim after completion")
             .is_empty());
 
-        sqlx::query("DELETE FROM channels WHERE community_id=$1")
-            .bind(community_uuid)
+        sqlx::query("DELETE FROM channels WHERE community_id = ANY($1)")
+            .bind([community_uuid, other_community_uuid])
             .execute(&pool)
             .await
             .expect("clean channels");
-        sqlx::query("DELETE FROM communities WHERE id=$1")
-            .bind(community_uuid)
+        sqlx::query("DELETE FROM communities WHERE id = ANY($1)")
+            .bind([community_uuid, other_community_uuid])
             .execute(&pool)
             .await
             .expect("clean community");

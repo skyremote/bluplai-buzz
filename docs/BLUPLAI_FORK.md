@@ -69,10 +69,32 @@ broad unrelated desktop rewrite, stop the sync. Do not weaken the Tauri, React,
 or hidden-capability checks to make the merge pass; reassess the extraction
 contract first.
 
-## Production boundary still to prove
+### Recorded sync rehearsal
 
-This foundation proves browser consumption and fork reproducibility only. It
-does not claim the later production tenant, membership-revocation, admission,
-backup, restore, or rollback evidence. Those controls belong to the managed
-gateway and production runtime units and must be proven against the exact
-fork/runtime SHA before any cohort is activated.
+On 2026-08-03 the maintained fork at
+`c1208cd43b068c21a342dc0709edd3099e247e48` fetched upstream main at
+`651f6372754e60e3f936b3397040eb0f1e44c9f3`. The merge base was
+`a5dbdf5e61e4c512acd99c219c79c154ddb57295`; the fork was five commits ahead
+and upstream was 15 commits ahead. `git merge-tree --write-tree` produced tree
+`639b23a469ef474099e426c3dd7d6ce224706686` with no textual conflict, and the
+upstream range did not touch the Bluplai browser package/docs or Bluplai
+relay/admin/database extensions.
+
+This is rehearsal evidence, not approval. No upstream commit was merged,
+published or deployed. A candidate sync must still review all changed paths,
+licensing, migrations, protocol/auth/media behavior and pass the complete fork
+and Bluplai integration suites before Bluplai repins the package.
+
+For an urgent upstream security fix, prefer a reviewed cherry-pick only when
+its dependency chain is understood. Record the source commit, run the same
+security/tenant/package gates, then reconcile it in the next full upstream sync
+so the fork does not permanently diverge.
+
+## Release and retirement boundary
+
+The fork can be updated independently, but no fork change can enter production
+until Bluplai pins the exact package/image SHA and deploys it through the
+separate release gate. Legacy-chat retirement is also separate: it requires a
+fresh restore rehearsal, privacy/legal-hold clearance, zero legacy runtime
+dependencies and a minimum 30-day post-final-cohort window. An upstream sync
+never authorises either a deployment or destructive retirement.
