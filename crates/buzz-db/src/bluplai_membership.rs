@@ -77,7 +77,7 @@ pub async fn provision_managed_room(
     )
     .bind(channel_id)
     .bind(community_id.as_uuid())
-    .bind(&name)
+    .bind(name)
     .bind(channel_type)
     .bind(owner_pubkey)
     .bind(participant_hash.as_deref())
