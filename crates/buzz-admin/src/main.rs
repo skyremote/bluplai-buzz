@@ -99,6 +99,12 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Import a canonical Bluplai legacy chat manifest with a dedicated signer.
+    ImportBluplaiChat {
+        /// Path to the protected canonical import JSON document.
+        #[arg(long)]
+        manifest: PathBuf,
+    },
     /// Fail unless the Bluplai production deployment contract is satisfied.
     ValidateBluplaiDeployment,
     /// Inspect deployment-wide Buzz product feedback.
@@ -203,6 +209,25 @@ async fn run(cli: Cli) -> Result<i32> {
                     .await
                     .map_err(anyhow::Error::msg)?;
             println!("{}", serde_json::to_string(&summary)?);
+            Ok(0)
+        }
+        Command::ImportBluplaiChat { manifest } => {
+            commands::import_bluplai_chat::validate_environment(
+                std::env::var("BUZZ_HISTORICAL_IMPORT_ACK").ok().as_deref(),
+            )
+            .map_err(anyhow::Error::msg)?;
+            let database_url = std::env::var("DATABASE_URL")
+                .map_err(|_| anyhow::anyhow!("DATABASE_URL is required"))?;
+            let key_hex = std::env::var("BUZZ_MIGRATION_PRIVATE_KEY")
+                .map_err(|_| anyhow::anyhow!("BUZZ_MIGRATION_PRIVATE_KEY is required"))?;
+            let keys = Keys::parse(&key_hex)
+                .map_err(|error| anyhow::anyhow!("invalid migration private key: {error}"))?;
+            let input = commands::import_bluplai_chat::read_manifest_file(&manifest)
+                .map_err(anyhow::Error::msg)?;
+            let results = commands::import_bluplai_chat::import(&database_url, &input, &keys)
+                .await
+                .map_err(anyhow::Error::msg)?;
+            println!("{}", serde_json::to_string(&results)?);
             Ok(0)
         }
         Command::ValidateBluplaiDeployment => {
