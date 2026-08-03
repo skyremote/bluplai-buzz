@@ -1,0 +1,145 @@
+.bluplai-chat {
+  --bluplai-chat-accent: #3758f9;
+  --bluplai-chat-border: #dbe2f0;
+  --bluplai-chat-muted: #5f6b7a;
+  --bluplai-chat-surface: #ffffff;
+  --bluplai-chat-surface-subtle: #f6f8fc;
+  color: #172033;
+  background: var(--bluplai-chat-surface);
+  border: 1px solid var(--bluplai-chat-border);
+  border-radius: 1rem;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  overflow: hidden;
+}
+
+.bluplai-chat button {
+  color: inherit;
+  font: inherit;
+}
+
+.bluplai-chat__brand {
+  border-bottom: 1px solid var(--bluplai-chat-border);
+  padding: 1rem 1.25rem;
+}
+
+.bluplai-chat__brand h1,
+.bluplai-chat__timeline h2,
+.bluplai-chat__timeline p {
+  margin: 0;
+}
+
+.bluplai-chat__brand h1 {
+  font-size: 1rem;
+}
+
+.bluplai-chat__workspace {
+  display: grid;
+  grid-template-columns: minmax(11rem, 16rem) minmax(0, 1fr);
+  min-height: 24rem;
+}
+
+.bluplai-chat__rooms {
+  background: var(--bluplai-chat-surface-subtle);
+  border-right: 1px solid var(--bluplai-chat-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+}
+
+.bluplai-chat__rooms button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0.625rem;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  padding: 0.625rem 0.75rem;
+  text-align: left;
+}
+
+.bluplai-chat__rooms button[aria-current="page"] {
+  background: #e9edff;
+  color: #223db4;
+  font-weight: 600;
+}
+
+.bluplai-chat__timeline {
+  padding: 1rem 1.25rem;
+}
+
+.bluplai-chat__timeline > header {
+  border-bottom: 1px solid var(--bluplai-chat-border);
+  padding-bottom: 0.75rem;
+}
+
+.bluplai-chat__timeline > header p {
+  color: var(--bluplai-chat-muted);
+  font-size: 0.875rem;
+  margin-top: 0.25rem;
+}
+
+.bluplai-chat__conversation {
+  border-bottom: 1px solid var(--bluplai-chat-border);
+  padding: 1rem 0;
+}
+
+.bluplai-chat__message p {
+  margin-top: 0.375rem;
+}
+
+.bluplai-chat__message-header {
+  align-items: baseline;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.bluplai-chat__message-header time,
+.bluplai-chat__read-state {
+  color: var(--bluplai-chat-muted);
+  font-size: 0.75rem;
+}
+
+.bluplai-chat__reactions {
+  display: flex;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+}
+
+.bluplai-chat__reactions button {
+  align-items: center;
+  background: var(--bluplai-chat-surface-subtle);
+  border: 1px solid var(--bluplai-chat-border);
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+}
+
+.bluplai-chat__reactions button[aria-pressed="true"] {
+  background: #e9edff;
+  border-color: var(--bluplai-chat-accent);
+}
+
+.bluplai-chat__thread {
+  border-left: 2px solid var(--bluplai-chat-border);
+  display: grid;
+  gap: 0.875rem;
+  margin-left: 1rem;
+  margin-top: 0.875rem;
+  padding-left: 1rem;
+}
+
+@media (max-width: 42rem) {
+  .bluplai-chat__workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .bluplai-chat__rooms {
+    border-bottom: 1px solid var(--bluplai-chat-border);
+    border-right: 0;
+  }
+}
