@@ -40,6 +40,19 @@ export interface ChatMember extends ChatAuthor {
   role: "owner" | "admin" | "member" | "guest" | "agent";
 }
 
+export interface ChatTypingIndicator {
+  roomId: string;
+  userId: string;
+  displayName: string;
+  threadRootId?: string | null;
+}
+
+export interface ChatTypingState {
+  active: boolean;
+  threadRootId?: string | null;
+  parentMessageId?: string | null;
+}
+
 /** A browser-safe message projection supplied by a host transport. */
 export interface ChatMessage {
   id: string;
@@ -94,6 +107,7 @@ export interface ChatWorkspaceSnapshot {
   messages: ChatMessage[];
   readStates: ChatReadState[];
   members?: ChatMember[];
+  typing?: ChatTypingIndicator[];
 }
 
 /** Commands that the browser chat package may send to its host transport. */
@@ -172,6 +186,8 @@ export interface BuzzChatTransport {
     roomId: string,
     signal: AbortSignal,
   ): Promise<ChatHistoryLoadResult>;
+  /** Publish or stop the current viewer's ephemeral typing heartbeat. */
+  setTyping?(roomId: string, state: ChatTypingState): void;
   uploadAttachment?(
     roomId: string,
     file: File,

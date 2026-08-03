@@ -137,6 +137,48 @@ describe("managed browser gateway", () => {
     ]);
   });
 
+  it("publishes only bounded presence and typing commands", async () => {
+    FakeWebSocket.instances = [];
+    const session = new BuzzGatewaySession({
+      url: "wss://gateway.example.test/buzz-chat/ws",
+      ticket: "bzt_ephemeral",
+      roomIds: ["room-1"],
+      onEvent: vi.fn(),
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    });
+    const connecting = session.connect();
+    const socket = FakeWebSocket.instances[0];
+    if (!socket) throw new Error("gateway socket was not constructed");
+    socket.open();
+    socket.receive({
+      type: "authenticated",
+      read_only: false,
+      history_boundary: 1_786_000_123,
+    });
+    await connecting;
+
+    const presence = session.publishPresence("room-1", "online");
+    const typing = session.publishTyping("room-1", {
+      parentMessageId: "d".repeat(64),
+      threadRootId: "c".repeat(64),
+    });
+    expect(JSON.parse(socket.sent[2] ?? "")).toMatchObject({
+      type: "presence",
+      room_id: "room-1",
+      status: "online",
+    });
+    expect(JSON.parse(socket.sent[3] ?? "")).toMatchObject({
+      type: "typing",
+      room_id: "room-1",
+      parent_event_id: "d".repeat(64),
+      thread_root_id: "c".repeat(64),
+    });
+    socket.receive({ type: "accepted", result: { event_id: "1".repeat(64) } });
+    socket.receive({ type: "accepted", result: { event_id: "2".repeat(64) } });
+    await expect(presence).resolves.toBeUndefined();
+    await expect(typing).resolves.toBeUndefined();
+  });
+
   it("chunks more than 100 rooms into one canonical subscription command", async () => {
     FakeWebSocket.instances = [];
     const roomIds = Array.from(

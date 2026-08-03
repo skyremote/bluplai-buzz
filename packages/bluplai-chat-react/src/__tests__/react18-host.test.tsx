@@ -134,6 +134,58 @@ describe("React 18 host compatibility", () => {
     expect(within(thread).getByLabelText("Unread message")).toBeTruthy();
   });
 
+  it("renders live presence and publishes bounded typing state", async () => {
+    const liveWorkspace: ChatWorkspaceSnapshot = {
+      ...workspace,
+      rooms: workspace.rooms.map((room) =>
+        room.id === "room-general"
+          ? { ...room, memberIds: ["user-daniel", "user-leandro"] }
+          : room,
+      ),
+      members: [
+        {
+          id: "user-daniel",
+          displayName: "Daniel",
+          presence: "online",
+          role: "admin",
+        },
+        {
+          id: "user-leandro",
+          displayName: "Leandro",
+          presence: "online",
+          role: "member",
+        },
+      ],
+      typing: [
+        {
+          roomId: "room-general",
+          userId: "user-leandro",
+          displayName: "Leandro",
+          threadRootId: null,
+        },
+      ],
+    };
+    const { transport } = createTransport(liveWorkspace);
+    transport.setTyping = vi.fn();
+    render(<BluplaiChat transport={transport} />);
+
+    expect(await screen.findByText("2/2 online")).toBeTruthy();
+    expect(screen.getByText("Leandro is typing…")).toBeTruthy();
+    const composer = screen.getByRole("textbox", { name: "Message General" });
+    fireEvent.change(composer, { target: { value: "Draft" } });
+    expect(transport.setTyping).toHaveBeenLastCalledWith("room-general", {
+      active: true,
+      parentMessageId: null,
+      threadRootId: null,
+    });
+    fireEvent.change(composer, { target: { value: "" } });
+    expect(transport.setTyping).toHaveBeenLastCalledWith("room-general", {
+      active: false,
+      parentMessageId: null,
+      threadRootId: null,
+    });
+  });
+
   it("renders a recoverable error instead of an empty or desktop-only shell", async () => {
     const { transport } = createTransport();
     transport.loadWorkspace = vi.fn(async () => {

@@ -18,6 +18,7 @@ export {
   type GatewayConnectionOptions,
   type GatewayHistoryCursor,
   type GatewayHistoryPage,
+  type GatewayTypingContext,
   type NostrEvent,
 } from "./transport/gateway";
 export type {
@@ -34,6 +35,8 @@ export type {
   ChatReaction,
   ChatReadState,
   ChatRoom,
+  ChatTypingIndicator,
+  ChatTypingState,
   ChatWorkspaceSnapshot,
   ChatWorkspaceCapabilities,
   HiddenSurfaceCommand,

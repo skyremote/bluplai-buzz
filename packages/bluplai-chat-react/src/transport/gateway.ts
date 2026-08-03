@@ -39,7 +39,16 @@ export interface GatewayHistoryPage {
   nextCursor: GatewayHistoryCursor | null;
 }
 
+export interface GatewayTypingContext {
+  threadRootId?: string | null;
+  parentMessageId?: string | null;
+}
+
 const MAX_ROOM_IDS_PER_CHUNK = 100;
+
+function ephemeralCommandId(prefix: "presence" | "typing"): string {
+  return `${prefix}_${globalThis.crypto.randomUUID().replaceAll("-", "")}`;
+}
 
 function roomIdChunks(roomIds: readonly string[]): string[][] {
   const chunks: string[][] = [];
@@ -283,6 +292,31 @@ export class BuzzGatewaySession {
       throw new Error("gateway search response is invalid");
     }
     return result.events;
+  }
+
+  async publishPresence(
+    roomId: string,
+    status: "online" | "away" | "offline",
+  ): Promise<void> {
+    await this.execute({
+      type: "presence",
+      command_id: ephemeralCommandId("presence"),
+      room_id: roomId,
+      status,
+    });
+  }
+
+  async publishTyping(
+    roomId: string,
+    context: GatewayTypingContext = {},
+  ): Promise<void> {
+    await this.execute({
+      type: "typing",
+      command_id: ephemeralCommandId("typing"),
+      room_id: roomId,
+      thread_root_id: context.threadRootId ?? null,
+      parent_event_id: context.parentMessageId ?? null,
+    });
   }
 
   close(): void {

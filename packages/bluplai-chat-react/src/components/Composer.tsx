@@ -14,6 +14,7 @@ export interface ComposerProps {
   onCancelReply?: () => void;
   onSubmit: (value: ComposerSubmit) => Promise<void>;
   onUpload?: (file: File, signal: AbortSignal) => Promise<ChatAttachment>;
+  onTypingChange?: (active: boolean) => void;
 }
 
 export function Composer({
@@ -24,17 +25,31 @@ export function Composer({
   onCancelReply,
   onSubmit,
   onUpload,
+  onTypingChange,
 }: ComposerProps) {
   const [body, setBody] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const uploadController = useRef<AbortController | null>(null);
+  const typingActive = useRef(false);
+  const onTypingChangeRef = useRef(onTypingChange);
+
+  useEffect(() => {
+    onTypingChangeRef.current = onTypingChange;
+  }, [onTypingChange]);
+
+  const updateTyping = (active: boolean) => {
+    if (typingActive.current === active) return;
+    typingActive.current = active;
+    onTypingChangeRef.current?.(active);
+  };
 
   useEffect(
     () => () => {
       uploadController.current?.abort();
       uploadController.current = null;
+      if (typingActive.current) onTypingChangeRef.current?.(false);
     },
     [],
   );
@@ -42,6 +57,7 @@ export function Composer({
   const submit = async () => {
     if ((!body.trim() && attachments.length === 0) || submitting || disabled)
       return;
+    updateTyping(false);
     setSubmitting(true);
     setError(null);
     try {
@@ -121,7 +137,11 @@ export function Composer({
         <textarea
           aria-label={`Message ${roomName}`}
           disabled={disabled || submitting}
-          onChange={(event) => setBody(event.target.value)}
+          onBlur={() => updateTyping(false)}
+          onChange={(event) => {
+            setBody(event.target.value);
+            updateTyping(Boolean(event.target.value.trim()));
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();

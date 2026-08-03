@@ -116,6 +116,7 @@ export function BluplaiChat({
   const initialRoomIdRef = useRef(initialRoomId);
   const uploadAttachment = transport.uploadAttachment?.bind(transport);
   const loadOlderMessages = transport.loadOlderMessages?.bind(transport);
+  const setTyping = transport.setTyping?.bind(transport);
   const capabilities =
     workspace.status === "ready" ? workspace.snapshot.capabilities : null;
   const readOnly = capabilities?.readOnly !== false;
@@ -197,6 +198,27 @@ export function BluplaiChat({
       )
       .filter((message) => message.threadRootId === rootId);
   }, [projection, searchContextMessages, threadRoot]);
+  const typingIndicators =
+    workspace.status === "ready" ? (workspace.snapshot.typing ?? []) : [];
+  const currentUserId =
+    workspace.status === "ready" ? workspace.snapshot.currentUserId : null;
+  const rootTyping = projection
+    ? typingIndicators.filter(
+        (indicator) =>
+          indicator.roomId === projection.room.id &&
+          !indicator.threadRootId &&
+          indicator.userId !== currentUserId,
+      )
+    : [];
+  const threadTyping =
+    projection && threadRoot
+      ? typingIndicators.filter(
+          (indicator) =>
+            indicator.roomId === projection.room.id &&
+            indicator.threadRootId === threadRoot.id &&
+            indicator.userId !== currentUserId,
+        )
+      : [];
   const searchRoomId = projection?.room.id;
 
   useEffect(() => {
@@ -469,11 +491,29 @@ export function BluplaiChat({
                     }
                   />
                 ))}
+                {rootTyping.length ? (
+                  <p className="bluplai-chat__typing" role="status">
+                    {rootTyping
+                      .map((indicator) => indicator.displayName)
+                      .join(", ")}
+                    {rootTyping.length === 1 ? " is" : " are"} typing…
+                  </p>
+                ) : null}
               </div>
               {!readOnly ? (
                 <Composer
                   compact={compact}
                   onSubmit={send}
+                  onTypingChange={
+                    setTyping
+                      ? (active) =>
+                          setTyping(projection.room.id, {
+                            active,
+                            parentMessageId: null,
+                            threadRootId: null,
+                          })
+                      : undefined
+                  }
                   onUpload={
                     uploadAttachment
                       ? (file, signal) =>
@@ -515,11 +555,29 @@ export function BluplaiChat({
                   readState={projection.readState}
                 />
               ))}
+              {threadTyping.length ? (
+                <p className="bluplai-chat__typing" role="status">
+                  {threadTyping
+                    .map((indicator) => indicator.displayName)
+                    .join(", ")}
+                  {threadTyping.length === 1 ? " is" : " are"} typing…
+                </p>
+              ) : null}
               {!readOnly ? (
                 <Composer
                   compact
                   onCancelReply={() => setThreadRoot(null)}
                   onSubmit={send}
+                  onTypingChange={
+                    setTyping
+                      ? (active) =>
+                          setTyping(projection.room.id, {
+                            active,
+                            parentMessageId: threadRoot.id,
+                            threadRootId: threadRoot.id,
+                          })
+                      : undefined
+                  }
                   onUpload={
                     uploadAttachment
                       ? (file, signal) =>
