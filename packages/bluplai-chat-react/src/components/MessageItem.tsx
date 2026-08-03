@@ -108,7 +108,7 @@ export function MessageItem({
                 reaction.reactedByCurrentUser,
               )}
               aria-pressed={reaction.reactedByCurrentUser}
-              disabled={reaction.reactedByCurrentUser}
+              disabled={!onReact || reaction.reactedByCurrentUser}
               key={reaction.emoji}
               onClick={() => onReact?.(message, reaction.emoji)}
               type="button"

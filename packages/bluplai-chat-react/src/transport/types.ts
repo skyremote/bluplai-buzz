@@ -12,9 +12,21 @@ export interface ChatReaction {
   reactedByCurrentUser: boolean;
 }
 
-/** A room-authorised media object. The URL always points back at Bluplai. */
+/** Durable media metadata carried by a signed chat event. */
+export interface ChatAttachmentReference {
+  id: string;
+  sha256: string;
+  name: string;
+  contentType?: string | null;
+  byteSize?: number | null;
+  kind: "image" | "file";
+}
+
+/** A room-authorised media object resolved to a browser-safe URL by the host. */
 export interface ChatAttachment {
   id: string;
+  /** Optional for source compatibility; newly uploaded media always supplies it. */
+  sha256?: string;
   name: string;
   contentType?: string | null;
   byteSize?: number | null;
@@ -65,8 +77,15 @@ export interface ChatReadState {
   lastReadMessageId?: string | null;
 }
 
+/** Versioned permissions established by the authenticated gateway session. */
+export interface ChatWorkspaceCapabilities {
+  schemaVersion: 1;
+  readOnly: boolean;
+}
+
 /** An atomic chat projection used for initial load and realtime replacement. */
 export interface ChatWorkspaceSnapshot {
+  capabilities: ChatWorkspaceCapabilities;
   activeRoomId: string | null;
   currentUserId: string;
   rooms: ChatRoom[];
@@ -84,6 +103,7 @@ export type AllowedChatCommand =
       mentionedUserIds?: string[];
       threadRootId?: string;
       parentMessageId?: string;
+      attachments?: ChatAttachmentReference[];
     }
   | {
       type: "chat.add-reaction";
@@ -129,6 +149,18 @@ export interface BuzzChatTransport {
   loadWorkspace(options: LoadWorkspaceOptions): Promise<ChatWorkspaceSnapshot>;
   subscribe(listener: (snapshot: ChatWorkspaceSnapshot) => void): () => void;
   execute(command: AllowedChatCommand): Promise<ChatCommandResult>;
+  /** Server-backed room search; local filtering is only a compatibility fallback. */
+  searchMessages?(
+    roomId: string,
+    query: string,
+    signal: AbortSignal,
+  ): Promise<ChatMessage[]>;
+  /** Load the minimum message context needed to navigate to a search hit. */
+  loadMessageContext?(
+    roomId: string,
+    messageId: string,
+    signal: AbortSignal,
+  ): Promise<ChatMessage[]>;
   uploadAttachment?(
     roomId: string,
     file: File,

@@ -6,6 +6,8 @@ import { RoomList } from "./components/RoomList";
 import { SearchPanel } from "./components/SearchPanel";
 import type {
   BuzzChatTransport,
+  ChatAttachment,
+  ChatAttachmentReference,
   ChatMessage,
   ChatRoom,
   ChatWorkspaceSnapshot,
@@ -58,11 +60,20 @@ function commandId(): string {
   return `web_${random ?? `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
 }
 
-function attachmentLinks(value: ComposerSubmit): string {
-  const links = value.attachments.map(
-    (attachment) => `[${attachment.name}](${attachment.downloadUrl})`,
-  );
-  return [value.body, ...links].filter(Boolean).join("\n");
+function attachmentReference(
+  attachment: ChatAttachment,
+): ChatAttachmentReference {
+  if (!attachment.sha256) {
+    throw new Error(`Attachment ${attachment.name} is missing its checksum`);
+  }
+  return {
+    id: attachment.id,
+    sha256: attachment.sha256,
+    name: attachment.name,
+    contentType: attachment.contentType,
+    byteSize: attachment.byteSize,
+    kind: attachment.kind,
+  };
 }
 
 /** Browser workspace powered by the host's managed Buzz gateway transport. */
@@ -86,9 +97,19 @@ export function BluplaiChat({
   const [threadRoot, setThreadRoot] = useState<ChatMessage | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [serverSearchMessages, setServerSearchMessages] = useState<
+    ChatMessage[]
+  >([]);
+  const [searchContextMessages, setSearchContextMessages] = useState<
+    ChatMessage[]
+  >([]);
+  const searchNavigationController = useRef<AbortController | null>(null);
   const lastMarkedRead = useRef<string | null>(null);
   const initialRoomIdRef = useRef(initialRoomId);
   const uploadAttachment = transport.uploadAttachment?.bind(transport);
+  const capabilities =
+    workspace.status === "ready" ? workspace.snapshot.capabilities : null;
+  const readOnly = capabilities?.readOnly !== false;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -114,6 +135,13 @@ export function BluplaiChat({
       unsubscribe();
     };
   }, [transport]);
+
+  useEffect(
+    () => () => {
+      searchNavigationController.current?.abort();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (workspace.status !== "ready" || !initialRoomId) return;
@@ -149,60 +177,117 @@ export function BluplaiChat({
     );
     return { room, messages, roots, repliesByRoot, readState, members };
   }, [selectedRoomId, workspace]);
+  const threadReplies = useMemo(() => {
+    if (!projection || !threadRoot) return [];
+    const rootId = threadRoot.threadRootId ?? threadRoot.id;
+    return [...projection.messages, ...searchContextMessages]
+      .filter(
+        (message, index, all) =>
+          all.findIndex((candidate) => candidate.id === message.id) === index,
+      )
+      .filter((message) => message.threadRootId === rootId);
+  }, [projection, searchContextMessages, threadRoot]);
+  const searchRoomId = projection?.room.id;
 
   useEffect(() => {
-    if (!projection || projection.messages.length === 0) return;
+    const search = transport.searchMessages?.bind(transport);
+    const query = searchQuery.trim();
+    if (!searchOpen || !searchRoomId || !search || !query) {
+      setServerSearchMessages([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void search(searchRoomId, query, controller.signal)
+        .then((messages) => {
+          if (!controller.signal.aborted) setServerSearchMessages(messages);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setServerSearchMessages([]);
+        });
+    }, 150);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchOpen, searchQuery, searchRoomId, transport]);
+
+  useEffect(() => {
+    if (
+      mode !== "workspace" ||
+      readOnly ||
+      !projection ||
+      projection.messages.length === 0
+    )
+      return;
     const latest = projection.messages.at(-1);
     if (!latest || latest.id === lastMarkedRead.current) return;
     lastMarkedRead.current = latest.id;
-    void executeChatCommand(transport, {
-      type: "chat.mark-read",
-      roomId: projection.room.id,
-      messageId: latest.id,
-    }).catch(() => {
+    void executeChatCommand(
+      transport,
+      {
+        type: "chat.mark-read",
+        roomId: projection.room.id,
+        messageId: latest.id,
+      },
+      capabilities,
+    ).catch(() => {
       if (lastMarkedRead.current === latest.id) lastMarkedRead.current = null;
     });
-  }, [projection, transport]);
+  }, [capabilities, mode, projection, readOnly, transport]);
 
   const selectRoom = (room: ChatRoom) => {
     setSelectedRoomId(room.id);
     setThreadRoot(null);
+    setSearchContextMessages([]);
     setSearchOpen(false);
     onRoomChange?.(room);
   };
 
   const send = async (value: ComposerSubmit) => {
-    if (!projection) return;
-    const body = attachmentLinks(value);
+    if (!projection || !capabilities) return;
+    const attachments = value.attachments.map(attachmentReference);
     await executeChatCommand(
       transport,
       threadRoot
         ? {
             type: "chat.send-message",
             roomId: projection.room.id,
-            body,
+            body: value.body,
+            attachments,
             parentMessageId: threadRoot.id,
             threadRootId: threadRoot.threadRootId ?? threadRoot.id,
           }
-        : { type: "chat.send-message", roomId: projection.room.id, body },
+        : {
+            type: "chat.send-message",
+            roomId: projection.room.id,
+            body: value.body,
+            attachments,
+          },
+      capabilities,
     );
   };
 
   const react = async (message: ChatMessage, emoji: string) => {
-    await executeChatCommand(transport, {
-      type: "chat.add-reaction",
-      roomId: message.roomId,
-      messageId: message.id,
-      emoji,
-    });
+    if (!capabilities) return;
+    await executeChatCommand(
+      transport,
+      {
+        type: "chat.add-reaction",
+        roomId: message.roomId,
+        messageId: message.id,
+        emoji,
+      },
+      capabilities,
+    );
   };
 
   const roomList =
     workspace.status === "ready" ? (
       <RoomList
         compact={compact || mode === "rail"}
-        onCreateDm={onCreateDm}
-        onCreateRoom={onCreateRoom}
+        onCreateDm={readOnly ? undefined : onCreateDm}
+        onCreateRoom={readOnly ? undefined : onCreateRoom}
         onSelect={selectRoom}
         rooms={workspace.snapshot.rooms}
         selectedRoomId={selectedRoomId}
@@ -274,7 +359,9 @@ export function BluplaiChat({
                   <button onClick={() => setSearchOpen(true)} type="button">
                     Search
                   </button>
-                  {onManageMembers && projection.room.canManageMembers ? (
+                  {!readOnly &&
+                  onManageMembers &&
+                  projection.room.canManageMembers ? (
                     <button
                       onClick={() => onManageMembers(projection.room)}
                       type="button"
@@ -282,7 +369,7 @@ export function BluplaiChat({
                       Members
                     </button>
                   ) : null}
-                  {onNotificationPreferenceChange ? (
+                  {!readOnly && onNotificationPreferenceChange ? (
                     <select
                       aria-label="Notification preference"
                       onChange={(event) =>
@@ -311,8 +398,18 @@ export function BluplaiChat({
                     compact={compact}
                     key={message.id}
                     message={message}
-                    onOpenThread={setThreadRoot}
-                    onReact={(item, emoji) => void react(item, emoji)}
+                    onOpenThread={
+                      !readOnly ||
+                      (projection.repliesByRoot.get(message.id)?.length ?? 0) >
+                        0
+                        ? setThreadRoot
+                        : undefined
+                    }
+                    onReact={
+                      readOnly
+                        ? undefined
+                        : (item, emoji) => void react(item, emoji)
+                    }
                     readState={projection.readState}
                     threadReplyCount={
                       projection.repliesByRoot.get(message.id)?.length ?? 0
@@ -320,17 +417,19 @@ export function BluplaiChat({
                   />
                 ))}
               </div>
-              <Composer
-                compact={compact}
-                onSubmit={send}
-                onUpload={
-                  uploadAttachment
-                    ? (file, signal) =>
-                        uploadAttachment(projection.room.id, file, signal)
-                    : undefined
-                }
-                roomName={projection.room.name}
-              />
+              {!readOnly ? (
+                <Composer
+                  compact={compact}
+                  onSubmit={send}
+                  onUpload={
+                    uploadAttachment
+                      ? (file, signal) =>
+                          uploadAttachment(projection.room.id, file, signal)
+                      : undefined
+                  }
+                  roomName={projection.room.name}
+                />
+              ) : null}
             </main>
           ) : (
             <div className="bluplai-chat__state">Select a room to begin.</div>
@@ -355,11 +454,7 @@ export function BluplaiChat({
                 message={threadRoot}
                 readState={projection.readState}
               />
-              {(
-                projection.repliesByRoot.get(
-                  threadRoot.threadRootId ?? threadRoot.id,
-                ) ?? []
-              ).map((reply) => (
+              {threadReplies.map((reply) => (
                 <MessageItem
                   compact
                   key={reply.id}
@@ -367,32 +462,73 @@ export function BluplaiChat({
                   readState={projection.readState}
                 />
               ))}
-              <Composer
-                compact
-                onCancelReply={() => setThreadRoot(null)}
-                onSubmit={send}
-                replyToLabel={threadRoot.author.displayName}
-                roomName={projection.room.name}
-              />
+              {!readOnly ? (
+                <Composer
+                  compact
+                  onCancelReply={() => setThreadRoot(null)}
+                  onSubmit={send}
+                  replyToLabel={threadRoot.author.displayName}
+                  roomName={projection.room.name}
+                />
+              ) : null}
             </aside>
           ) : null}
           {searchOpen && projection ? (
             <SearchPanel
-              messages={projection.messages}
+              messages={
+                transport.searchMessages
+                  ? serverSearchMessages
+                  : projection.messages
+              }
               onClose={() => {
                 setSearchOpen(false);
                 setSearchQuery("");
               }}
               onQueryChange={setSearchQuery}
               onSelect={(message) => {
-                const rootId = message.threadRootId;
-                if (rootId) {
-                  const root = projection.messages.find(
-                    (item) => item.id === rootId,
-                  );
-                  if (root) setThreadRoot(root);
-                }
-                setSearchOpen(false);
+                void (async () => {
+                  searchNavigationController.current?.abort();
+                  const controller = new AbortController();
+                  searchNavigationController.current = controller;
+                  try {
+                    let context = projection.messages;
+                    const rootId = message.threadRootId;
+                    const needsContext =
+                      !projection.messages.some(
+                        (item) => item.id === message.id,
+                      ) ||
+                      Boolean(
+                        rootId &&
+                          !projection.messages.some(
+                            (item) => item.id === rootId,
+                          ),
+                      );
+                    if (needsContext) {
+                      const loadContext =
+                        transport.loadMessageContext?.bind(transport);
+                      if (!loadContext) return;
+                      context = await loadContext(
+                        projection.room.id,
+                        message.id,
+                        controller.signal,
+                      );
+                      if (controller.signal.aborted) return;
+                      setSearchContextMessages(context);
+                    }
+                    const root = rootId
+                      ? context.find((item) => item.id === rootId)
+                      : message;
+                    if (root) setThreadRoot(root);
+                    setSearchOpen(false);
+                    setSearchQuery("");
+                  } catch {
+                    // Keep search open so the user can retry navigation.
+                  } finally {
+                    if (searchNavigationController.current === controller) {
+                      searchNavigationController.current = null;
+                    }
+                  }
+                })();
               }}
               query={searchQuery}
             />

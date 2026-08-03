@@ -3,7 +3,9 @@ import type {
   BuzzChatTransport,
   ChatCommand,
   ChatCommandResult,
+  ChatWorkspaceCapabilities,
 } from "./transport/types";
+import { ReadOnlySessionError } from "./transport/gateway";
 
 /** Render and command capabilities available in Bluplai's browser package. */
 export const BLUPLAI_CHAT_CAPABILITIES = Object.freeze({
@@ -22,6 +24,10 @@ export const BLUPLAI_CHAT_CAPABILITIES = Object.freeze({
   huddles: false,
   acp: false,
 });
+
+/** Fail-closed state used until an authenticated gateway frame grants writes. */
+export const READ_ONLY_CHAT_CAPABILITIES: ChatWorkspaceCapabilities =
+  Object.freeze({ schemaVersion: 1, readOnly: true });
 
 const ALLOWED_COMMAND_TYPES = new Set<AllowedChatCommand["type"]>([
   "chat.send-message",
@@ -67,10 +73,12 @@ export function isAllowedChatCommand(
 export async function executeChatCommand(
   transport: BuzzChatTransport,
   command: ChatCommand,
+  capabilities: ChatWorkspaceCapabilities,
 ): Promise<ChatCommandResult> {
   if (!isAllowedChatCommand(command)) {
     throw new CapabilityDeniedError(command.type);
   }
+  if (capabilities.readOnly) throw new ReadOnlySessionError();
 
   return transport.execute(command);
 }

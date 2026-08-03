@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChatAttachment } from "../transport/types";
 
 export interface ComposerSubmit {
@@ -31,6 +31,14 @@ export function Composer({
   const [error, setError] = useState<string | null>(null);
   const uploadController = useRef<AbortController | null>(null);
 
+  useEffect(
+    () => () => {
+      uploadController.current?.abort();
+      uploadController.current = null;
+    },
+    [],
+  );
+
   const submit = async () => {
     if ((!body.trim() && attachments.length === 0) || submitting || disabled)
       return;
@@ -61,6 +69,10 @@ export function Composer({
     } catch (caught) {
       if (!controller.signal.aborted) {
         setError(caught instanceof Error ? caught.message : "Upload failed");
+      }
+    } finally {
+      if (uploadController.current === controller) {
+        uploadController.current = null;
       }
     }
   };
