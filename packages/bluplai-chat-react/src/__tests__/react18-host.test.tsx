@@ -320,6 +320,64 @@ describe("React 18 host compatibility", () => {
     );
   });
 
+  it("uploads and sends durable attachments from a thread composer", async () => {
+    const { commands, transport } = createTransport();
+    transport.uploadAttachment = vi.fn(async () => ({
+      id: "media-thread-1",
+      sha256: "b".repeat(64),
+      name: "thread-evidence.pdf",
+      contentType: "application/pdf",
+      byteSize: 8,
+      kind: "file" as const,
+      downloadUrl: "blob:thread-preview",
+    }));
+    render(<BluplaiChat transport={transport} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "1 reply" }));
+    const thread = screen.getByRole("complementary", {
+      name: "Thread replies to Launch plan",
+    });
+    const input = thread.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!input) throw new Error("thread attachment input was not rendered");
+    fireEvent.change(input, {
+      target: {
+        files: [
+          new File(["evidence"], "thread-evidence.pdf", {
+            type: "application/pdf",
+          }),
+        ],
+      },
+    });
+    await within(thread).findByText("thread-evidence.pdf");
+    fireEvent.click(within(thread).getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(
+        commands.find(
+          (command) =>
+            command.type === "chat.send-message" &&
+            command.threadRootId === "message-root",
+        ),
+      ).toEqual({
+        type: "chat.send-message",
+        roomId: "room-general",
+        body: "",
+        threadRootId: "message-root",
+        parentMessageId: "message-root",
+        attachments: [
+          {
+            id: "media-thread-1",
+            sha256: "b".repeat(64),
+            name: "thread-evidence.pdf",
+            contentType: "application/pdf",
+            byteSize: 8,
+            kind: "file",
+          },
+        ],
+      }),
+    );
+  });
+
   it("aborts an active attachment upload when the composer unmounts", async () => {
     const { transport } = createTransport();
     let uploadSignal: AbortSignal | undefined;

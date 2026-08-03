@@ -467,6 +467,12 @@ export function BluplaiChat({
                   compact
                   onCancelReply={() => setThreadRoot(null)}
                   onSubmit={send}
+                  onUpload={
+                    uploadAttachment
+                      ? (file, signal) =>
+                          uploadAttachment(projection.room.id, file, signal)
+                      : undefined
+                  }
                   replyToLabel={threadRoot.author.displayName}
                   roomName={projection.room.name}
                 />
