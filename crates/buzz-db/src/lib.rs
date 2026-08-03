@@ -548,6 +548,140 @@ impl Default for DbConfig {
     }
 }
 
+/// Narrow writer-only database handle for offline historical event recovery.
+///
+/// Unlike [`Db`], every connection deliberately leaves the migration-0021
+/// `buzz.created_at_floor` GUC unset so an operator can restore signed events
+/// older than the live ingest envelope. This handle has no read-replica pool,
+/// exposes no routed-read API, and must only be constructed while the external
+/// recovery breaker is closed and normal writers are stopped.
+pub struct EventRecoveryDb {
+    pool: PgPool,
+    _closed_replica_fence: std::sync::Arc<replica_fence::ReplicaFence>,
+}
+
+impl EventRecoveryDb {
+    /// Connect a dedicated unarmed writer pool for offline event recovery.
+    ///
+    /// A configured read-replica URL is rejected rather than ignored. Every
+    /// pooled session proves it is a writable primary and explicitly clears
+    /// `buzz.created_at_floor`; this never changes [`Db::new`] or its armed
+    /// writer sessions.
+    pub async fn connect(config: &DbConfig) -> Result<Self> {
+        if config
+            .read_database_url
+            .as_deref()
+            .is_some_and(|url| !url.trim().is_empty())
+        {
+            return Err(DbError::InvalidData(
+                "historical event recovery forbids a read-replica pool".to_string(),
+            ));
+        }
+
+        let pool = PgPoolOptions::new()
+            .max_connections(config.max_connections)
+            .min_connections(config.min_connections)
+            .acquire_timeout(Duration::from_secs(config.acquire_timeout_secs))
+            .max_lifetime(Duration::from_secs(config.max_lifetime_secs))
+            .idle_timeout(Duration::from_secs(config.idle_timeout_secs))
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    let is_writable_primary: bool = sqlx::query_scalar(
+                        "SELECT NOT pg_is_in_recovery() \
+                         AND current_setting('transaction_read_only') = 'off'",
+                    )
+                    .fetch_one(&mut *conn)
+                    .await?;
+                    if !is_writable_primary {
+                        return Err(sqlx::Error::Protocol(
+                            "historical event recovery requires a writable primary".to_string(),
+                        ));
+                    }
+                    sqlx::query("SELECT set_config('buzz.created_at_floor', '', false)")
+                        .execute(&mut *conn)
+                        .await?;
+                    Ok(())
+                })
+            })
+            .connect(&config.database_url)
+            .await?;
+
+        let closed_replica_fence = std::sync::Arc::new(replica_fence::ReplicaFence::new());
+        if closed_replica_fence.verified_through().is_some() {
+            return Err(DbError::InvalidData(
+                "historical event recovery replica fence is not closed".to_string(),
+            ));
+        }
+        Ok(Self {
+            pool,
+            _closed_replica_fence: closed_replica_fence,
+        })
+    }
+
+    /// Resolve an active community exclusively from its canonical host.
+    pub async fn lookup_community_by_host(
+        &self,
+        normalized_host: &str,
+    ) -> Result<Option<CommunityRecord>> {
+        let row = sqlx::query(
+            "SELECT id, host FROM communities \
+             WHERE lower(host) = lower($1) AND archived_at IS NULL",
+        )
+        .bind(normalized_host)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| {
+            Ok(CommunityRecord {
+                id: CommunityId::from_uuid(row.try_get("id")?),
+                host: row.try_get("host")?,
+            })
+        })
+        .transpose()
+    }
+
+    /// Fetch a channel in the server-resolved community.
+    pub async fn get_channel(
+        &self,
+        community_id: CommunityId,
+        channel_id: Uuid,
+    ) -> Result<channel::ChannelRecord> {
+        channel::get_channel(&self.pool, community_id, channel_id).await
+    }
+
+    /// Fetch an active stored event by community-scoped event ID.
+    pub async fn get_event_by_id(
+        &self,
+        community_id: CommunityId,
+        id_bytes: &[u8],
+    ) -> Result<Option<StoredEvent>> {
+        event::get_event_by_id(&self.pool, community_id, id_bytes).await
+    }
+
+    /// Fetch a stored event including a soft-deleted row.
+    pub async fn get_event_by_id_including_deleted(
+        &self,
+        community_id: CommunityId,
+        id_bytes: &[u8],
+    ) -> Result<Option<StoredEvent>> {
+        event::get_event_by_id_including_deleted(&self.pool, community_id, id_bytes).await
+    }
+
+    /// Insert one verified historical event without the live created-at floor.
+    ///
+    /// The shared event-row helper preserves community-scoped idempotency and
+    /// never updates an existing event row. Recovery deliberately does not
+    /// populate derived mention or other projection tables; operators must
+    /// rebuild and reconcile those independently before cutover.
+    pub async fn insert_event(
+        &self,
+        community_id: CommunityId,
+        event: &nostr::Event,
+        channel_id: Uuid,
+    ) -> Result<(StoredEvent, bool)> {
+        event::insert_event(&self.pool, community_id, event, Some(channel_id)).await
+    }
+}
+
 /// Community host-map row returned by [`Db::lookup_community_by_host`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommunityRecord {

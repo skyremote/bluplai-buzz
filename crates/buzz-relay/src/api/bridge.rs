@@ -2458,6 +2458,30 @@ mod tests {
         headers
     }
 
+    #[test]
+    fn verify_bridge_auth_rejects_x_pubkey_when_production_auth_is_required() {
+        let keys = Keys::generate();
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            "x-pubkey",
+            keys.public_key()
+                .to_hex()
+                .parse()
+                .expect("valid header value"),
+        );
+
+        let (status, _) = verify_bridge_auth(
+            &headers,
+            "POST",
+            "https://host-a.example/events",
+            Some(b"{}"),
+            true,
+        )
+        .expect_err("production auth must never accept the development X-Pubkey path");
+
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
     /// Row 44 obligation: a NIP-98 event signed against community A's host
     /// MUST be rejected at the bridge when the request resolves to community
     /// B's host. The conformance text in `docs/multi-tenant-conformance.md`

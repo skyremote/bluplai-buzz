@@ -23,8 +23,10 @@ buzz-media = { workspace = true }
 nostr = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true }
 anyhow = { workspace = true }
 hex = { workspace = true }
+sha2 = { workspace = true }
 deadpool-redis = { workspace = true }
 # Redis TLS (rediss://, e.g. ElastiCache) uses rustls, which needs a process
 # CryptoProvider installed at startup. The workspace redis TLS feature compiles
@@ -35,3 +37,4 @@ tracing = { workspace = true }
 sqlx = { workspace = true }
 url = { workspace = true }
 clap = { version = "4", features = ["derive"] }
+uuid = { workspace = true }

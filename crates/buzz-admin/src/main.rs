@@ -20,16 +20,19 @@
 //! newest timestamp and collide on the bumped second. run.sh serialization is
 //! the guard against parallel adds (e.g. `xargs -P`).
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
 use buzz_core::kind::KIND_NIP43_MEMBERSHIP_LIST;
 use buzz_core::tenant::{relay_url_authority, TenantContext};
-use buzz_db::{Db, DbConfig};
+use buzz_db::{Db, DbConfig, EventRecoveryDb};
 use buzz_pubsub::{EventTopic, PubSubManager};
 use clap::{Parser, Subcommand};
 use nostr::{EventBuilder, Keys, Kind, Tag};
 use tracing::warn;
+
+mod commands;
 
 #[derive(Parser)]
 #[command(name = "buzz-admin", about = "Buzz instance administration")]
@@ -76,6 +79,28 @@ enum Command {
     GenerateKey,
     /// Run pending database migrations.
     Migrate,
+    /// Idempotently provision a Bluplai organisation community.
+    ProvisionBluplaiCommunity {
+        /// Opaque stable chat key generated and persisted by Bluplai.
+        #[arg(long)]
+        organization_chat_key: String,
+    },
+    /// Reconcile a v1 Bluplai signed-event journal after an older DB restore.
+    RecoverBluplaiEvents {
+        /// Canonical community host selected and resolved by the server.
+        #[arg(long)]
+        community_host: String,
+
+        /// Path to the immutable v1 JSONL accepted-event journal.
+        #[arg(long)]
+        journal: PathBuf,
+
+        /// Validate and report missing events without writing to Postgres.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Fail unless the Bluplai production deployment contract is satisfied.
+    ValidateBluplaiDeployment,
     /// Inspect deployment-wide Buzz product feedback.
     ProductFeedback {
         #[command(subcommand)]
@@ -140,6 +165,54 @@ async fn run(cli: Cli) -> Result<i32> {
             let db = connect_db().await?;
             db.migrate().await?;
             println!("Database migrations complete.");
+            Ok(0)
+        }
+        Command::ProvisionBluplaiCommunity {
+            organization_chat_key,
+        } => {
+            let config = commands::provision_bluplai_community::ProvisioningConfig::from_env()
+                .map_err(anyhow::Error::msg)?;
+            let db = connect_db().await?;
+            let provisioned = commands::provision_bluplai_community::provision(
+                &db,
+                &organization_chat_key,
+                &config,
+            )
+            .await
+            .map_err(anyhow::Error::msg)?;
+            println!("{}", serde_json::to_string(&provisioned)?);
+            Ok(0)
+        }
+        Command::RecoverBluplaiEvents {
+            community_host,
+            journal,
+            dry_run,
+        } => {
+            let read_database_url = std::env::var("READ_DATABASE_URL").ok();
+            let recovery_ack = std::env::var("BUZZ_RECOVERY_MODE_ACK").ok();
+            commands::recover_bluplai_events::validate_recovery_environment(
+                read_database_url.as_deref(),
+                recovery_ack.as_deref(),
+            )
+            .map_err(anyhow::Error::msg)?;
+            let input = commands::recover_bluplai_events::read_journal_file(&journal)
+                .map_err(anyhow::Error::msg)?;
+            let db = connect_recovery_db().await?;
+            let summary =
+                commands::recover_bluplai_events::recover(&db, &input, &community_host, dry_run)
+                    .await
+                    .map_err(anyhow::Error::msg)?;
+            println!("{}", serde_json::to_string(&summary)?);
+            Ok(0)
+        }
+        Command::ValidateBluplaiDeployment => {
+            let config = commands::provision_bluplai_community::ProvisioningConfig::from_env()
+                .map_err(anyhow::Error::msg)?;
+            commands::provision_bluplai_community::validate_production_deployment(
+                config.deployment(),
+            )
+            .map_err(anyhow::Error::msg)?;
+            println!("Bluplai production deployment contract valid.");
             Ok(0)
         }
         Command::AddMember { pubkey, role } => cmd_add_member(pubkey, role).await,
@@ -428,6 +501,19 @@ async fn connect_db() -> Result<Db> {
     Ok(db)
 }
 
+async fn connect_recovery_db() -> Result<EventRecoveryDb> {
+    let db_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://buzz:buzz_dev@localhost:5432/buzz".to_string());
+    EventRecoveryDb::connect(&DbConfig {
+        database_url: db_url,
+        read_database_url: None,
+        min_connections: 0,
+        ..DbConfig::default()
+    })
+    .await
+    .map_err(Into::into)
+}
+
 /// Resolve the deployment's tenant from the configured `RELAY_URL` host.
 ///
 /// `buzz-admin` runs inside the relay container (`compose exec relay
@@ -581,4 +667,33 @@ async fn reconcile_channels(relay_key_arg: Option<String>) -> Result<()> {
         channels.len()
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    #[test]
+    fn recovery_cli_accepts_only_a_host_journal_and_optional_dry_run() {
+        let cli = Cli::try_parse_from([
+            "buzz-admin",
+            "recover-bluplai-events",
+            "--community-host",
+            "org-0123456789abcdef0123456789abcdef01234567.chat.bluplai.com",
+            "--journal",
+            "/private/recovery/events.jsonl",
+            "--dry-run",
+        ]);
+        assert!(cli.is_ok());
+
+        let forbidden_uuid_authority = Cli::try_parse_from([
+            "buzz-admin",
+            "recover-bluplai-events",
+            "--community-id",
+            "11111111-1111-4111-8111-111111111111",
+            "--journal",
+            "/private/recovery/events.jsonl",
+        ]);
+        assert!(forbidden_uuid_authority.is_err());
+    }
 }
