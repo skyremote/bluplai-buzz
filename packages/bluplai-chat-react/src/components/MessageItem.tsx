@@ -88,7 +88,12 @@ export function MessageItem({
         {message.attachments?.length ? (
           <div className="bluplai-chat__attachments">
             {message.attachments.map((attachment) => (
-              <a href={attachment.downloadUrl} key={attachment.id}>
+              <a
+                download={attachment.name}
+                href={attachment.downloadUrl}
+                key={attachment.id}
+                rel="noopener noreferrer"
+              >
                 {attachment.kind === "image" && attachment.thumbnailUrl ? (
                   <img alt={attachment.name} src={attachment.thumbnailUrl} />
                 ) : (

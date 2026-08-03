@@ -905,6 +905,14 @@ mod tests {
             desired_schema.contains("CREATE TABLE join_policy_acceptances"),
             "desired-state schema must include join-policy evidence used by invite claims",
         );
+        assert!(
+            desired_schema.contains("CREATE TABLE bluplai_visible_event_outbox"),
+            "desired-state schema must include the Bluplai visible-event outbox used by fresh and CI databases",
+        );
+        assert!(
+            desired_schema.contains("CREATE TABLE bluplai_historical_imports"),
+            "desired-state schema must include the Bluplai historical-import ledger used by fresh and CI databases",
+        );
 
         // Replica heartbeat (this branch, renumbered to 0026 after
         // 0025_relay_invites landed on main): the fence's portable read-side

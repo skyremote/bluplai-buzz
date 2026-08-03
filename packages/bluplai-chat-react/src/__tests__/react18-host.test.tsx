@@ -18,6 +18,7 @@ import {
   type ChatCommand,
   type ChatWorkspaceSnapshot,
 } from "../index";
+import { MessageItem } from "../components/MessageItem";
 
 const workspace: ChatWorkspaceSnapshot = {
   capabilities: { schemaVersion: 1, readOnly: false },
@@ -91,6 +92,34 @@ afterEach(() => {
 });
 
 describe("React 18 host compatibility", () => {
+  it("forces attachment links to download without retaining opener access", () => {
+    render(
+      <MessageItem
+        message={{
+          id: "message-attachment",
+          roomId: "room-general",
+          author: { id: "user-leandro", displayName: "Leandro" },
+          body: "Review this file",
+          createdAt: "2026-08-03T08:00:00.000Z",
+          reactions: [],
+          attachments: [
+            {
+              id: "media-html",
+              name: "evidence.html",
+              kind: "file",
+              contentType: "text/html",
+              downloadUrl: "blob:active-content",
+            },
+          ],
+        }}
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: /evidence\.html/i });
+    expect(link.getAttribute("download")).toBe("evidence.html");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
   it("mounts and unmounts under React 18.3 without owning the host runtime", async () => {
     expect(React.version).toBe("18.3.1");
     const { disconnect, transport } = createTransport();
