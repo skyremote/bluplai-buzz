@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { executeChatCommand } from "./capabilities";
+import { Composer, type ComposerSubmit } from "./components/Composer";
+import { MessageItem } from "./components/MessageItem";
+import { RoomList } from "./components/RoomList";
+import { SearchPanel } from "./components/SearchPanel";
 import type {
   BuzzChatTransport,
   ChatMessage,
-  ChatReadState,
   ChatRoom,
   ChatWorkspaceSnapshot,
 } from "./transport/types";
@@ -12,6 +16,17 @@ export interface BluplaiChatProps {
   transport: BuzzChatTransport;
   className?: string;
   initialRoomId?: string;
+  mode?: "workspace" | "rail";
+  compact?: boolean;
+  showRoomList?: boolean;
+  onRoomChange?: (room: ChatRoom) => void;
+  onCreateRoom?: () => void;
+  onCreateDm?: () => void;
+  onManageMembers?: (room: ChatRoom) => void;
+  onNotificationPreferenceChange?: (
+    room: ChatRoom,
+    preference: "all" | "mentions" | "muted",
+  ) => Promise<void> | void;
 }
 
 type WorkspaceState =
@@ -25,107 +40,55 @@ function errorMessage(error: unknown): string {
 
 function resolveRoomId(
   snapshot: ChatWorkspaceSnapshot,
-  requestedRoomId?: string,
+  requestedRoomId?: string | null,
 ): string | null {
   const candidates = [requestedRoomId, snapshot.activeRoomId];
   for (const candidate of candidates) {
-    if (candidate && snapshot.rooms.some((room) => room.id === candidate)) {
-      return candidate;
-    }
+    if (!candidate) continue;
+    const room = snapshot.rooms.find(
+      (item) => item.id === candidate || item.conversationId === candidate,
+    );
+    if (room) return room.id;
   }
   return snapshot.rooms[0]?.id ?? null;
 }
 
-function isMessageRead(
-  message: ChatMessage,
-  readState: ChatReadState | undefined,
-): boolean {
-  if (!readState) return false;
-  return Date.parse(message.createdAt) <= Date.parse(readState.lastReadAt);
+function commandId(): string {
+  const random = globalThis.crypto?.randomUUID?.().replaceAll("-", "");
+  return `web_${random ?? `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
 }
 
-function reactionLabel(
-  emoji: string,
-  count: number,
-  reactedByCurrentUser: boolean,
-): string {
-  const people = count === 1 ? "1 person" : `${count} people`;
-  const viewer = reactedByCurrentUser ? ", you reacted" : "";
-  return `${emoji} reaction, ${people}${viewer}`;
-}
-
-function MessageCard({
-  message,
-  readState,
-}: {
-  message: ChatMessage;
-  readState: ChatReadState | undefined;
-}) {
-  const read = isMessageRead(message, readState);
-  return (
-    <article
-      aria-label={`Message from ${message.author.displayName}`}
-      className="bluplai-chat__message"
-    >
-      <header className="bluplai-chat__message-header">
-        <strong>{message.author.displayName}</strong>
-        <time dateTime={message.createdAt}>
-          {new Date(message.createdAt).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </time>
-        <span
-          aria-label={read ? "Read message" : "Unread message"}
-          className="bluplai-chat__read-state"
-          role="status"
-        >
-          {read ? "Read" : "Unread"}
-        </span>
-      </header>
-      <p>{message.body}</p>
-      {message.reactions.length > 0 ? (
-        <div className="bluplai-chat__reactions">
-          {message.reactions.map((reaction) => (
-            <button
-              aria-label={reactionLabel(
-                reaction.emoji,
-                reaction.count,
-                reaction.reactedByCurrentUser,
-              )}
-              aria-pressed={reaction.reactedByCurrentUser}
-              key={reaction.emoji}
-              type="button"
-            >
-              <span aria-hidden="true">{reaction.emoji}</span>
-              <span>{reaction.count}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </article>
+function attachmentLinks(value: ComposerSubmit): string {
+  const links = value.attachments.map(
+    (attachment) => `[${attachment.name}](${attachment.downloadUrl})`,
   );
+  return [value.body, ...links].filter(Boolean).join("\n");
 }
 
-function roomButtonLabel(room: ChatRoom): string {
-  return room.unreadCount > 0
-    ? `${room.name}, ${room.unreadCount} unread`
-    : room.name;
-}
-
-/**
- * Minimal browser workspace proving the React and transport seams without
- * importing Buzz desktop, authentication, Tauri, or developer-only surfaces.
- */
+/** Browser workspace powered by the host's managed Buzz gateway transport. */
 export function BluplaiChat({
   transport,
   className,
   initialRoomId,
+  mode = "workspace",
+  compact = false,
+  showRoomList = true,
+  onRoomChange,
+  onCreateRoom,
+  onCreateDm,
+  onManageMembers,
+  onNotificationPreferenceChange,
 }: BluplaiChatProps) {
   const [workspace, setWorkspace] = useState<WorkspaceState>({
     status: "loading",
   });
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const [threadRoot, setThreadRoot] = useState<ChatMessage | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const lastMarkedRead = useRef<string | null>(null);
+  const initialRoomIdRef = useRef(initialRoomId);
+  const uploadAttachment = transport.uploadAttachment?.bind(transport);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -134,11 +97,10 @@ export function BluplaiChat({
       if (!mounted) return;
       setWorkspace({ status: "ready", snapshot });
       setSelectedRoomId((current) =>
-        resolveRoomId(snapshot, current ?? initialRoomId),
+        resolveRoomId(snapshot, current ?? initialRoomIdRef.current),
       );
     };
     const unsubscribe = transport.subscribe(acceptSnapshot);
-
     transport
       .loadWorkspace({ signal: controller.signal })
       .then(acceptSnapshot)
@@ -146,112 +108,299 @@ export function BluplaiChat({
         if (!mounted || controller.signal.aborted) return;
         setWorkspace({ status: "error", message: errorMessage(error) });
       });
-
     return () => {
       mounted = false;
       controller.abort();
       unsubscribe();
     };
-  }, [initialRoomId, transport]);
+  }, [transport]);
 
-  const roomProjection = useMemo(() => {
+  useEffect(() => {
+    if (workspace.status !== "ready" || !initialRoomId) return;
+    setSelectedRoomId(resolveRoomId(workspace.snapshot, initialRoomId));
+  }, [initialRoomId, workspace]);
+
+  const projection = useMemo(() => {
     if (workspace.status !== "ready" || !selectedRoomId) return null;
     const room = workspace.snapshot.rooms.find(
-      (candidate) => candidate.id === selectedRoomId,
+      (item) => item.id === selectedRoomId,
     );
     if (!room) return null;
-    const roomMessages = workspace.snapshot.messages.filter(
-      (message) => message.roomId === room.id,
-    );
-    const rootMessages = roomMessages.filter(
-      (message) => !message.threadRootId,
-    );
+    const messages = workspace.snapshot.messages
+      .filter((message) => message.roomId === room.id)
+      .sort(
+        (left, right) =>
+          Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+          left.id.localeCompare(right.id),
+      );
+    const roots = messages.filter((message) => !message.threadRootId);
     const repliesByRoot = new Map<string, ChatMessage[]>();
-    for (const message of roomMessages) {
+    for (const message of messages) {
       if (!message.threadRootId) continue;
       const replies = repliesByRoot.get(message.threadRootId) ?? [];
       replies.push(message);
       repliesByRoot.set(message.threadRootId, replies);
     }
     const readState = workspace.snapshot.readStates.find(
-      (candidate) => candidate.roomId === room.id,
+      (state) => state.roomId === room.id,
     );
-    return { readState, repliesByRoot, room, rootMessages };
+    const members = (workspace.snapshot.members ?? []).filter((member) =>
+      room.memberIds?.includes(member.id),
+    );
+    return { room, messages, roots, repliesByRoot, readState, members };
   }, [selectedRoomId, workspace]);
 
-  return (
-    <section className={["bluplai-chat", className].filter(Boolean).join(" ")}>
-      <header className="bluplai-chat__brand">
-        <h1>Bluplai Chat, powered by Buzz</h1>
-      </header>
+  useEffect(() => {
+    if (!projection || projection.messages.length === 0) return;
+    const latest = projection.messages.at(-1);
+    if (!latest || latest.id === lastMarkedRead.current) return;
+    lastMarkedRead.current = latest.id;
+    void executeChatCommand(transport, {
+      type: "chat.mark-read",
+      roomId: projection.room.id,
+      messageId: latest.id,
+    }).catch(() => {
+      if (lastMarkedRead.current === latest.id) lastMarkedRead.current = null;
+    });
+  }, [projection, transport]);
 
+  const selectRoom = (room: ChatRoom) => {
+    setSelectedRoomId(room.id);
+    setThreadRoot(null);
+    setSearchOpen(false);
+    onRoomChange?.(room);
+  };
+
+  const send = async (value: ComposerSubmit) => {
+    if (!projection) return;
+    const body = attachmentLinks(value);
+    await executeChatCommand(
+      transport,
+      threadRoot
+        ? {
+            type: "chat.send-message",
+            roomId: projection.room.id,
+            body,
+            parentMessageId: threadRoot.id,
+            threadRootId: threadRoot.threadRootId ?? threadRoot.id,
+          }
+        : { type: "chat.send-message", roomId: projection.room.id, body },
+    );
+  };
+
+  const react = async (message: ChatMessage, emoji: string) => {
+    await executeChatCommand(transport, {
+      type: "chat.add-reaction",
+      roomId: message.roomId,
+      messageId: message.id,
+      emoji,
+    });
+  };
+
+  const roomList =
+    workspace.status === "ready" ? (
+      <RoomList
+        compact={compact || mode === "rail"}
+        onCreateDm={onCreateDm}
+        onCreateRoom={onCreateRoom}
+        onSelect={selectRoom}
+        rooms={workspace.snapshot.rooms}
+        selectedRoomId={selectedRoomId}
+      />
+    ) : null;
+
+  return (
+    <section
+      className={[
+        "bluplai-chat",
+        compact ? "bluplai-chat--compact" : "",
+        mode === "rail" ? "bluplai-chat--rail" : "",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <header className="bluplai-chat__brand">
+        <h2 aria-label="Bluplai Chat, powered by Buzz">
+          <span>Bluplai Chat</span>
+          <span>powered by Buzz</span>
+        </h2>
+      </header>
       {workspace.status === "loading" ? (
-        <p aria-live="polite">Loading Bluplai Chat…</p>
+        <p aria-live="polite" className="bluplai-chat__state">
+          Loading Bluplai Chat…
+        </p>
       ) : null}
       {workspace.status === "error" ? (
-        <p role="alert">Unable to load Bluplai Chat: {workspace.message}</p>
+        <p className="bluplai-chat__state" role="alert">
+          Unable to load Bluplai Chat: {workspace.message}
+        </p>
       ) : null}
       {workspace.status === "ready" && workspace.snapshot.rooms.length === 0 ? (
-        <p>No chat rooms are available.</p>
+        <p className="bluplai-chat__state">No chat rooms are available.</p>
       ) : null}
-
-      {workspace.status === "ready" && workspace.snapshot.rooms.length > 0 ? (
-        <div className="bluplai-chat__workspace">
-          <nav aria-label="Chat rooms" className="bluplai-chat__rooms">
-            {workspace.snapshot.rooms.map((room) => (
-              <button
-                aria-current={room.id === selectedRoomId ? "page" : undefined}
-                aria-label={roomButtonLabel(room)}
-                key={room.id}
-                onClick={() => setSelectedRoomId(room.id)}
-                type="button"
-              >
-                <span>{room.name}</span>
-                {room.unreadCount > 0 ? (
-                  <span aria-hidden="true">{room.unreadCount}</span>
-                ) : null}
-              </button>
-            ))}
-          </nav>
-
-          {roomProjection ? (
+      {mode === "rail" ? roomList : null}
+      {mode === "workspace" &&
+      workspace.status === "ready" &&
+      workspace.snapshot.rooms.length ? (
+        <div
+          className={[
+            "bluplai-chat__workspace",
+            !showRoomList ? "bluplai-chat__workspace--without-rail" : "",
+            threadRoot ? "bluplai-chat__workspace--thread-open" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          {showRoomList ? roomList : null}
+          {projection ? (
             <main className="bluplai-chat__timeline">
-              <header>
-                <h2>{roomProjection.room.name}</h2>
-                {roomProjection.room.topic ? (
-                  <p>{roomProjection.room.topic}</p>
-                ) : null}
+              <header className="bluplai-chat__room-header">
+                <div>
+                  <h1>{projection.room.name}</h1>
+                  {projection.room.topic ? (
+                    <p>{projection.room.topic}</p>
+                  ) : null}
+                </div>
+                <div className="bluplai-chat__room-actions">
+                  <span title="Members online">
+                    {
+                      projection.members.filter(
+                        (member) => member.presence === "online",
+                      ).length
+                    }
+                    /{projection.members.length} online
+                  </span>
+                  <button onClick={() => setSearchOpen(true)} type="button">
+                    Search
+                  </button>
+                  {onManageMembers && projection.room.canManageMembers ? (
+                    <button
+                      onClick={() => onManageMembers(projection.room)}
+                      type="button"
+                    >
+                      Members
+                    </button>
+                  ) : null}
+                  {onNotificationPreferenceChange ? (
+                    <select
+                      aria-label="Notification preference"
+                      onChange={(event) =>
+                        void onNotificationPreferenceChange(
+                          projection.room,
+                          event.target.value as "all" | "mentions" | "muted",
+                        )
+                      }
+                      value={projection.room.notificationPreference ?? "all"}
+                    >
+                      <option value="all">All messages</option>
+                      <option value="mentions">Mentions</option>
+                      <option value="muted">Muted</option>
+                    </select>
+                  ) : null}
+                </div>
               </header>
-              {roomProjection.rootMessages.map((message) => {
-                const replies =
-                  roomProjection.repliesByRoot.get(message.id) ?? [];
-                return (
-                  <div className="bluplai-chat__conversation" key={message.id}>
-                    <MessageCard
-                      message={message}
-                      readState={roomProjection.readState}
-                    />
-                    {replies.length > 0 ? (
-                      <section
-                        aria-label={`Thread replies to ${message.body}`}
-                        className="bluplai-chat__thread"
-                      >
-                        {replies.map((reply) => (
-                          <MessageCard
-                            key={reply.id}
-                            message={reply}
-                            readState={roomProjection.readState}
-                          />
-                        ))}
-                      </section>
-                    ) : null}
-                  </div>
-                );
-              })}
+              <div className="bluplai-chat__message-stream">
+                {projection.roots.length === 0 ? (
+                  <p className="bluplai-chat__empty-room">
+                    This room is ready. Start the conversation.
+                  </p>
+                ) : null}
+                {projection.roots.map((message) => (
+                  <MessageItem
+                    compact={compact}
+                    key={message.id}
+                    message={message}
+                    onOpenThread={setThreadRoot}
+                    onReact={(item, emoji) => void react(item, emoji)}
+                    readState={projection.readState}
+                    threadReplyCount={
+                      projection.repliesByRoot.get(message.id)?.length ?? 0
+                    }
+                  />
+                ))}
+              </div>
+              <Composer
+                compact={compact}
+                onSubmit={send}
+                onUpload={
+                  uploadAttachment
+                    ? (file, signal) =>
+                        uploadAttachment(projection.room.id, file, signal)
+                    : undefined
+                }
+                roomName={projection.room.name}
+              />
             </main>
+          ) : (
+            <div className="bluplai-chat__state">Select a room to begin.</div>
+          )}
+          {threadRoot && projection ? (
+            <aside
+              aria-label={`Thread replies to ${threadRoot.body}`}
+              className="bluplai-chat__thread-panel"
+            >
+              <header>
+                <strong>Thread</strong>
+                <button
+                  aria-label="Close thread"
+                  onClick={() => setThreadRoot(null)}
+                  type="button"
+                >
+                  ×
+                </button>
+              </header>
+              <MessageItem
+                compact
+                message={threadRoot}
+                readState={projection.readState}
+              />
+              {(
+                projection.repliesByRoot.get(
+                  threadRoot.threadRootId ?? threadRoot.id,
+                ) ?? []
+              ).map((reply) => (
+                <MessageItem
+                  compact
+                  key={reply.id}
+                  message={reply}
+                  readState={projection.readState}
+                />
+              ))}
+              <Composer
+                compact
+                onCancelReply={() => setThreadRoot(null)}
+                onSubmit={send}
+                replyToLabel={threadRoot.author.displayName}
+                roomName={projection.room.name}
+              />
+            </aside>
+          ) : null}
+          {searchOpen && projection ? (
+            <SearchPanel
+              messages={projection.messages}
+              onClose={() => {
+                setSearchOpen(false);
+                setSearchQuery("");
+              }}
+              onQueryChange={setSearchQuery}
+              onSelect={(message) => {
+                const rootId = message.threadRootId;
+                if (rootId) {
+                  const root = projection.messages.find(
+                    (item) => item.id === rootId,
+                  );
+                  if (root) setThreadRoot(root);
+                }
+                setSearchOpen(false);
+              }}
+              query={searchQuery}
+            />
           ) : null}
         </div>
       ) : null}
     </section>
   );
 }
+
+export { commandId };

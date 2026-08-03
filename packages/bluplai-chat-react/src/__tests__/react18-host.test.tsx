@@ -1,4 +1,11 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -114,7 +121,8 @@ describe("React 18 host compatibility", () => {
       }),
     ).toBeTruthy();
 
-    const thread = screen.getByRole("region", {
+    fireEvent.click(screen.getByRole("button", { name: "1 reply" }));
+    const thread = screen.getByRole("complementary", {
       name: "Thread replies to Launch plan",
     });
     expect(
@@ -150,6 +158,41 @@ describe("React 18 host compatibility", () => {
     expect(
       await screen.findByText("No chat rooms are available."),
     ).toBeTruthy();
+  });
+
+  it("sends through the bounded composer and searches the active room", async () => {
+    const { commands, transport } = createTransport();
+    render(<BluplaiChat transport={transport} />);
+    const composer = await screen.findByRole("textbox", {
+      name: "Message General",
+    });
+    fireEvent.change(composer, { target: { value: "We should ship" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(
+        commands.some(
+          (command) =>
+            command.type === "chat.send-message" &&
+            command.body === "We should ship",
+        ),
+      ).toBe(true),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    const search = screen.getByRole("searchbox", {
+      name: "Search messages",
+    });
+    fireEvent.change(search, { target: { value: "compatibility" } });
+    expect(screen.getByText("Ship the compatibility gate first")).toBeTruthy();
+  });
+
+  it("supports a compact room-only sidecar surface", async () => {
+    const { transport } = createTransport();
+    render(<BluplaiChat compact mode="rail" transport={transport} />);
+    expect(
+      await screen.findByRole("button", { name: "General, 1 unread" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("main")).toBeNull();
   });
 });
 

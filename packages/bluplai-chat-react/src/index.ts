@@ -7,13 +7,24 @@ export {
   executeChatCommand,
   isAllowedChatCommand,
 } from "./capabilities";
+export {
+  BuzzGatewaySession,
+  eventReactionTarget,
+  eventReplyTarget,
+  eventRoomId,
+  isNostrEvent,
+  type GatewayConnectionOptions,
+  type NostrEvent,
+} from "./transport/gateway";
 export type {
   AllowedChatCommand,
   BuzzChatTransport,
+  ChatAttachment,
   ChatAuthor,
   ChatCommand,
   ChatCommandResult,
   ChatMessage,
+  ChatMember,
   ChatReaction,
   ChatReadState,
   ChatRoom,

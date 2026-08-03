@@ -12,6 +12,22 @@ export interface ChatReaction {
   reactedByCurrentUser: boolean;
 }
 
+/** A room-authorised media object. The URL always points back at Bluplai. */
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  contentType?: string | null;
+  byteSize?: number | null;
+  kind: "image" | "file";
+  downloadUrl: string;
+  thumbnailUrl?: string | null;
+}
+
+export interface ChatMember extends ChatAuthor {
+  presence: "online" | "away" | "offline";
+  role: "owner" | "admin" | "member" | "guest" | "agent";
+}
+
 /** A browser-safe message projection supplied by a host transport. */
 export interface ChatMessage {
   id: string;
@@ -23,14 +39,23 @@ export interface ChatMessage {
   parentMessageId?: string | null;
   threadRootId?: string | null;
   reactions: ChatReaction[];
+  attachments?: ChatAttachment[];
+  deliveryState?: "sending" | "sent" | "failed";
 }
 
 /** A room visible to the current Bluplai organisation member. */
 export interface ChatRoom {
   id: string;
+  conversationId?: string | null;
   name: string;
   topic?: string | null;
   unreadCount: number;
+  disclosureScope?: "internal" | "shared" | "private" | "dm";
+  accountId?: string | null;
+  projectId?: string | null;
+  memberIds?: string[];
+  notificationPreference?: "all" | "mentions" | "muted";
+  canManageMembers?: boolean;
 }
 
 /** The current viewer's monotonic room read frontier. */
@@ -47,6 +72,7 @@ export interface ChatWorkspaceSnapshot {
   rooms: ChatRoom[];
   messages: ChatMessage[];
   readStates: ChatReadState[];
+  members?: ChatMember[];
 }
 
 /** Commands that the browser chat package may send to its host transport. */
@@ -55,6 +81,7 @@ export type AllowedChatCommand =
       type: "chat.send-message";
       roomId: string;
       body: string;
+      mentionedUserIds?: string[];
       threadRootId?: string;
       parentMessageId?: string;
     }
@@ -86,6 +113,7 @@ export type ChatCommand = AllowedChatCommand | HiddenSurfaceCommand;
 export interface ChatCommandResult {
   ok: boolean;
   message?: string;
+  eventId?: string;
 }
 
 /** Options passed to the transport's abortable initial workspace read. */
@@ -101,4 +129,9 @@ export interface BuzzChatTransport {
   loadWorkspace(options: LoadWorkspaceOptions): Promise<ChatWorkspaceSnapshot>;
   subscribe(listener: (snapshot: ChatWorkspaceSnapshot) => void): () => void;
   execute(command: AllowedChatCommand): Promise<ChatCommandResult>;
+  uploadAttachment?(
+    roomId: string,
+    file: File,
+    signal: AbortSignal,
+  ): Promise<ChatAttachment>;
 }
