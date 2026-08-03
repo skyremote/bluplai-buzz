@@ -103,10 +103,19 @@ export function BluplaiChat({
   const [searchContextMessages, setSearchContextMessages] = useState<
     ChatMessage[]
   >([]);
+  const [historyHasMoreOverride, setHistoryHasMoreOverride] = useState<
+    Record<string, boolean>
+  >({});
+  const [historyLoadingRoomId, setHistoryLoadingRoomId] = useState<
+    string | null
+  >(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const searchNavigationController = useRef<AbortController | null>(null);
+  const historyController = useRef<AbortController | null>(null);
   const lastMarkedRead = useRef<string | null>(null);
   const initialRoomIdRef = useRef(initialRoomId);
   const uploadAttachment = transport.uploadAttachment?.bind(transport);
+  const loadOlderMessages = transport.loadOlderMessages?.bind(transport);
   const capabilities =
     workspace.status === "ready" ? workspace.snapshot.capabilities : null;
   const readOnly = capabilities?.readOnly !== false;
@@ -139,6 +148,7 @@ export function BluplaiChat({
   useEffect(
     () => () => {
       searchNavigationController.current?.abort();
+      historyController.current?.abort();
     },
     [],
   );
@@ -388,6 +398,49 @@ export function BluplaiChat({
                 </div>
               </header>
               <div className="bluplai-chat__message-stream">
+                {loadOlderMessages &&
+                (historyHasMoreOverride[projection.room.id] ??
+                  projection.room.hasOlderMessages) ? (
+                  <button
+                    className="bluplai-chat__load-older"
+                    disabled={historyLoadingRoomId === projection.room.id}
+                    onClick={() => {
+                      historyController.current?.abort();
+                      const controller = new AbortController();
+                      historyController.current = controller;
+                      setHistoryLoadingRoomId(projection.room.id);
+                      setHistoryError(null);
+                      void loadOlderMessages(
+                        projection.room.id,
+                        controller.signal,
+                      )
+                        .then((result) => {
+                          if (controller.signal.aborted) return;
+                          setHistoryHasMoreOverride((current) => ({
+                            ...current,
+                            [projection.room.id]: result.hasMore,
+                          }));
+                        })
+                        .catch((error: unknown) => {
+                          if (!controller.signal.aborted) {
+                            setHistoryError(errorMessage(error));
+                          }
+                        })
+                        .finally(() => {
+                          if (historyController.current === controller) {
+                            historyController.current = null;
+                            setHistoryLoadingRoomId(null);
+                          }
+                        });
+                    }}
+                    type="button"
+                  >
+                    {historyLoadingRoomId === projection.room.id
+                      ? "Loading older messages…"
+                      : "Load older messages"}
+                  </button>
+                ) : null}
+                {historyError ? <p role="alert">{historyError}</p> : null}
                 {projection.roots.length === 0 ? (
                   <p className="bluplai-chat__empty-room">
                     This room is ready. Start the conversation.

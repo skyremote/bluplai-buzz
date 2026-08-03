@@ -68,6 +68,8 @@ export interface ChatRoom {
   memberIds?: string[];
   notificationPreference?: "all" | "mentions" | "muted";
   canManageMembers?: boolean;
+  /** True when the relay has durable history older than the retained window. */
+  hasOlderMessages?: boolean;
 }
 
 /** The current viewer's monotonic room read frontier. */
@@ -141,6 +143,10 @@ export interface LoadWorkspaceOptions {
   signal: AbortSignal;
 }
 
+export interface ChatHistoryLoadResult {
+  hasMore: boolean;
+}
+
 /**
  * Browser-only boundary implemented by the host. Bluplai supplies a managed
  * gateway adapter; the Buzz desktop may supply a direct-relay adapter later.
@@ -161,6 +167,11 @@ export interface BuzzChatTransport {
     messageId: string,
     signal: AbortSignal,
   ): Promise<ChatMessage[]>;
+  /** Extend the retained room window by one server-issued history page. */
+  loadOlderMessages?(
+    roomId: string,
+    signal: AbortSignal,
+  ): Promise<ChatHistoryLoadResult>;
   uploadAttachment?(
     roomId: string,
     file: File,

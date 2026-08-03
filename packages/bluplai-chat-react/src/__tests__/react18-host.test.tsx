@@ -220,6 +220,34 @@ describe("React 18 host compatibility", () => {
     );
   });
 
+  it("loads older room history on demand and hides the control at exhaustion", async () => {
+    const historyWorkspace: ChatWorkspaceSnapshot = {
+      ...workspace,
+      rooms: workspace.rooms.map((room) =>
+        room.id === "room-general" ? { ...room, hasOlderMessages: true } : room,
+      ),
+    };
+    const { transport } = createTransport(historyWorkspace);
+    transport.loadOlderMessages = vi.fn(async () => ({ hasMore: false }));
+    render(<BluplaiChat transport={transport} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Load older messages" }),
+    );
+
+    await waitFor(() =>
+      expect(transport.loadOlderMessages).toHaveBeenCalledWith(
+        "room-general",
+        expect.any(AbortSignal),
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Load older messages" }),
+      ).toBeNull(),
+    );
+  });
+
   it("loads server context before navigating to an archived reply", async () => {
     const { transport } = createTransport();
     const archivedRoot = {

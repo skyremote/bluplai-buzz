@@ -261,6 +261,22 @@
   padding: 0.7rem 0;
 }
 
+.bluplai-chat__load-older {
+  align-self: center;
+  border: 1px solid var(--bluplai-chat-border);
+  border-radius: 999px;
+  background: var(--bluplai-chat-surface);
+  color: var(--bluplai-chat-muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.35rem 0.75rem;
+}
+
+.bluplai-chat__load-older:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .bluplai-chat__empty-room {
   color: var(--bluplai-chat-muted);
   margin: 2rem auto;

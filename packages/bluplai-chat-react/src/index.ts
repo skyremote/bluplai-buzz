@@ -28,6 +28,7 @@ export type {
   ChatAuthor,
   ChatCommand,
   ChatCommandResult,
+  ChatHistoryLoadResult,
   ChatMessage,
   ChatMember,
   ChatReaction,
