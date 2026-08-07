@@ -3,11 +3,19 @@ import type { SVGProps } from "react";
 export type ChatIconName =
   | "at"
   | "bell"
+  | "bold"
   | "chevron-down"
+  | "code"
+  | "file"
+  | "format"
   | "hash"
+  | "image"
+  | "italic"
+  | "language"
   | "lock"
   | "members"
   | "message"
+  | "more"
   | "paperclip"
   | "plus"
   | "search"
@@ -29,10 +37,47 @@ const paths: Record<ChatIconName, JSX.Element> = {
       <path d="M13.7 21a2 2 0 0 1-3.4 0" />
     </>
   ),
+  bold: (
+    <>
+      <path d="M7 5h6a4 4 0 0 1 0 8H7z" />
+      <path d="M7 13h7a4 4 0 0 1 0 8H7z" />
+    </>
+  ),
   "chevron-down": <path d="m7 10 5 5 5-5" />,
+  code: <path d="m8 9-4 3 4 3M16 9l4 3-4 3M14 5l-4 14" />,
+  file: (
+    <>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 2v6h6" />
+    </>
+  ),
+  format: (
+    <>
+      <path d="M4 20 10 4h4l6 16" />
+      <path d="M6.5 14h11" />
+    </>
+  ),
   hash: (
     <>
       <path d="M5 9h14M4 15h14M10 3 8 21M16 3l-2 18" />
+    </>
+  ),
+  image: (
+    <>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <circle cx="9" cy="9" r="2" />
+      <path d="m21 15-5-5L5 21" />
+    </>
+  ),
+  italic: (
+    <>
+      <path d="M10 4h8M6 20h8M14 4 10 20" />
+    </>
+  ),
+  language: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20" />
     </>
   ),
   lock: (
@@ -50,6 +95,13 @@ const paths: Record<ChatIconName, JSX.Element> = {
   ),
   message: (
     <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+  ),
+  more: (
+    <>
+      <circle cx="5" cy="12" r="1" />
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="19" cy="12" r="1" />
+    </>
   ),
   paperclip: (
     <path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.6-9.6a4 4 0 0 1 5.7 5.7l-9.6 9.6a2 2 0 0 1-2.8-2.8l8.9-8.9" />

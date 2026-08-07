@@ -9,6 +9,7 @@ import type {
   BuzzChatTransport,
   ChatAttachment,
   ChatAttachmentReference,
+  ChatGif,
   ChatMessage,
   ChatRoom,
   ChatWorkspaceSnapshot,
@@ -27,6 +28,8 @@ export interface BluplaiChatProps {
   onCreateDm?: () => void;
   onOpenRoomList?: () => void;
   onManageMembers?: (room: ChatRoom) => void;
+  /** Optional host-owned GIF provider. Omit to hide GIF search entirely. */
+  searchGifs?: (query: string, signal: AbortSignal) => Promise<ChatGif[]>;
   /** Host-owned context shown between the room header and message history. */
   roomContext?: ReactNode;
   onNotificationPreferenceChange?: (
@@ -93,6 +96,7 @@ export function BluplaiChat({
   onCreateDm,
   onOpenRoomList,
   onManageMembers,
+  searchGifs,
   roomContext,
   onNotificationPreferenceChange,
 }: BluplaiChatProps) {
@@ -331,13 +335,20 @@ export function BluplaiChat({
   const send = async (value: ComposerSubmit) => {
     if (!projection || !capabilities) return;
     const attachments = value.attachments.map(attachmentReference);
+    const body = [value.body, ...value.gifs.map((gif) => gif.url)]
+      .filter(Boolean)
+      .join("\n");
+    const mentions = value.mentionedUserIds.length
+      ? { mentionedUserIds: value.mentionedUserIds }
+      : {};
     await executeChatCommand(
       transport,
       threadRoot
         ? {
             type: "chat.send-message",
             roomId: projection.room.id,
-            body: value.body,
+            body,
+            ...mentions,
             attachments,
             parentMessageId: threadRoot.id,
             threadRootId: threadRoot.threadRootId ?? threadRoot.id,
@@ -345,7 +356,8 @@ export function BluplaiChat({
         : {
             type: "chat.send-message",
             roomId: projection.room.id,
-            body: value.body,
+            body,
+            ...mentions,
             attachments,
           },
       capabilities,
@@ -598,6 +610,9 @@ export function BluplaiChat({
                     compact={compact}
                     key={message.id}
                     message={message}
+                    mentionNames={projection.members.map(
+                      (member) => member.displayName,
+                    )}
                     onOpenThread={
                       !readOnly ||
                       (projection.repliesByRoot.get(message.id)?.length ?? 0) >
@@ -628,6 +643,8 @@ export function BluplaiChat({
               {!readOnly ? (
                 <Composer
                   compact={compact}
+                  members={projection.members}
+                  roomId={projection.room.id}
                   onSubmit={send}
                   onTypingChange={
                     setTyping
@@ -646,6 +663,7 @@ export function BluplaiChat({
                       : undefined
                   }
                   roomName={projection.room.name}
+                  searchGifs={searchGifs}
                 />
               ) : null}
             </main>
@@ -674,6 +692,9 @@ export function BluplaiChat({
               <MessageItem
                 compact
                 message={threadRoot}
+                mentionNames={projection.members.map(
+                  (member) => member.displayName,
+                )}
                 readState={projection.readState}
               />
               {threadReplies.map((reply) => (
@@ -681,6 +702,9 @@ export function BluplaiChat({
                   compact
                   key={reply.id}
                   message={reply}
+                  mentionNames={projection.members.map(
+                    (member) => member.displayName,
+                  )}
                   readState={projection.readState}
                 />
               ))}
@@ -695,6 +719,9 @@ export function BluplaiChat({
               {!readOnly ? (
                 <Composer
                   compact
+                  draftId={threadRoot.id}
+                  members={projection.members}
+                  roomId={projection.room.id}
                   onCancelReply={closeThread}
                   onSubmit={send}
                   onTypingChange={
@@ -715,6 +742,7 @@ export function BluplaiChat({
                   }
                   replyToLabel={threadRoot.author.displayName}
                   roomName={projection.room.name}
+                  searchGifs={searchGifs}
                 />
               ) : null}
             </aside>

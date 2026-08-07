@@ -35,6 +35,17 @@ export interface ChatAttachment {
   thumbnailUrl?: string | null;
 }
 
+/** A provider-neutral GIF result supplied by the host application. */
+export interface ChatGif {
+  id: string;
+  title: string;
+  url: string;
+  previewUrl: string;
+  stillUrl?: string | null;
+  width?: number | null;
+  height?: number | null;
+}
+
 export interface ChatMember extends ChatAuthor {
   presence: "online" | "away" | "offline";
   role: "owner" | "admin" | "member" | "guest" | "agent";

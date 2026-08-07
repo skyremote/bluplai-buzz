@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import React from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BluplaiChat,
   CapabilityDeniedError,
@@ -72,6 +72,38 @@ const workspace: ChatWorkspaceSnapshot = {
   ],
 };
 
+const interactiveWorkspace: ChatWorkspaceSnapshot = {
+  ...workspace,
+  rooms: workspace.rooms.map((room) =>
+    room.id === "room-general"
+      ? {
+          ...room,
+          memberIds: ["user-daniel", "user-leandro", "bluplai"],
+        }
+      : room,
+  ),
+  members: [
+    {
+      id: "user-daniel",
+      displayName: "Daniel",
+      presence: "online",
+      role: "admin",
+    },
+    {
+      id: "user-leandro",
+      displayName: "Leandro Piorkowski",
+      presence: "online",
+      role: "member",
+    },
+    {
+      id: "bluplai",
+      displayName: "Bluplai",
+      presence: "online",
+      role: "agent",
+    },
+  ],
+};
+
 function createTransport(snapshot: ChatWorkspaceSnapshot = workspace) {
   const commands: ChatCommand[] = [];
   const disconnect = vi.fn();
@@ -87,8 +119,23 @@ function createTransport(snapshot: ChatWorkspaceSnapshot = workspace) {
   return { commands, disconnect, transport };
 }
 
+const storedDrafts = new Map<string, string>();
+
+beforeEach(() => {
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      clear: () => storedDrafts.clear(),
+      getItem: (key: string) => storedDrafts.get(key) ?? null,
+      removeItem: (key: string) => storedDrafts.delete(key),
+      setItem: (key: string, value: string) => storedDrafts.set(key, value),
+    },
+  });
+});
+
 afterEach(() => {
   cleanup();
+  storedDrafts.clear();
 });
 
 describe("React 18 host compatibility", () => {
@@ -200,7 +247,7 @@ describe("React 18 host compatibility", () => {
 
     expect(await screen.findByText("2/2 online")).toBeTruthy();
     expect(screen.getByText("Leandro is typing…")).toBeTruthy();
-    const composer = screen.getByRole("textbox", { name: "Message General" });
+    const composer = screen.getByRole("combobox", { name: "Message General" });
     fireEvent.change(composer, { target: { value: "Draft" } });
     expect(transport.setTyping).toHaveBeenLastCalledWith("room-general", {
       active: true,
@@ -248,7 +295,7 @@ describe("React 18 host compatibility", () => {
   it("sends through the bounded composer and searches the active room", async () => {
     const { commands, transport } = createTransport();
     render(<BluplaiChat transport={transport} />);
-    const composer = await screen.findByRole("textbox", {
+    const composer = await screen.findByRole("combobox", {
       name: "Message General",
     });
     fireEvent.change(composer, { target: { value: "We should ship" } });
@@ -269,6 +316,187 @@ describe("React 18 host compatibility", () => {
     });
     fireEvent.change(search, { target: { value: "compatibility" } });
     expect(screen.getByText("Ship the compatibility gate first")).toBeTruthy();
+  });
+
+  it("opens live AI mention suggestions while typing and sends the selected identity", async () => {
+    const { commands, transport } = createTransport(interactiveWorkspace);
+    render(<BluplaiChat transport={transport} />);
+    const composer = await screen.findByRole("combobox", {
+      name: "Message General",
+    });
+
+    fireEvent.change(composer, {
+      target: { selectionStart: 4, value: "@blu" },
+    });
+    const option = await screen.findByRole("option", { name: /Bluplai/i });
+    expect(option.textContent).toContain("uses this room's context");
+    expect(composer.getAttribute("aria-expanded")).toBe("true");
+    expect(composer.getAttribute("aria-controls")).toBeTruthy();
+    expect(composer.getAttribute("aria-activedescendant")).toBe(option.id);
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect((composer as HTMLTextAreaElement).value).toBe("@Bluplai ");
+
+    fireEvent.change(composer, {
+      target: { value: "@Bluplai summarise the launch risks" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(
+        commands.find((command) => command.type === "chat.send-message"),
+      ).toEqual({
+        type: "chat.send-message",
+        roomId: "room-general",
+        body: "@Bluplai summarise the launch risks",
+        mentionedUserIds: ["bluplai"],
+        attachments: [],
+      }),
+    );
+  });
+
+  it("preserves stable multi-word mention identities with a room draft", async () => {
+    const first = createTransport(interactiveWorkspace);
+    const mounted = render(<BluplaiChat transport={first.transport} />);
+    const composer = await screen.findByRole("combobox", {
+      name: "Message General",
+    });
+    fireEvent.change(composer, {
+      target: { selectionStart: 4, value: "@lea" },
+    });
+    fireEvent.click(await screen.findByRole("option", { name: /Leandro/i }));
+    fireEvent.change(composer, {
+      target: { value: "@Leandro Piorkowski review the customer plan" },
+    });
+    mounted.unmount();
+
+    const second = createTransport(interactiveWorkspace);
+    render(<BluplaiChat transport={second.transport} />);
+    const restored = await screen.findByRole("combobox", {
+      name: "Message General",
+    });
+    expect((restored as HTMLTextAreaElement).value).toBe(
+      "@Leandro Piorkowski review the customer plan",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(
+        second.commands.find((command) => command.type === "chat.send-message"),
+      ).toMatchObject({ mentionedUserIds: ["user-leandro"] }),
+    );
+  });
+
+  it("isolates uploads and transient composer state when switching rooms", async () => {
+    const { transport } = createTransport(interactiveWorkspace);
+    let uploadSignal: AbortSignal | undefined;
+    transport.uploadAttachment = vi.fn((_roomId, _file, signal) => {
+      uploadSignal = signal;
+      return new Promise<ChatAttachment>(() => undefined);
+    });
+    render(<BluplaiChat transport={transport} />);
+    await screen.findByRole("combobox", { name: "Message General" });
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!input) throw new Error("attachment input was not rendered");
+    fireEvent.change(input, {
+      target: {
+        files: [new File(["data"], "room-only.png", { type: "image/png" })],
+      },
+    });
+    await screen.findByText("room-only.png");
+
+    fireEvent.click(screen.getByRole("button", { name: "Ideas" }));
+
+    await waitFor(() => expect(uploadSignal?.aborted).toBe(true));
+    expect(screen.queryByText("room-only.png")).toBeNull();
+    expect(
+      (
+        screen.getByRole("combobox", {
+          name: "Message Ideas",
+        }) as HTMLTextAreaElement
+      ).value,
+    ).toBe("");
+  });
+
+  it("offers slash actions, room-context AI prompts, and searchable emoji", async () => {
+    const { transport } = createTransport(interactiveWorkspace);
+    render(<BluplaiChat transport={transport} />);
+    const composer = await screen.findByRole("combobox", {
+      name: "Message General",
+    });
+
+    fireEvent.change(composer, {
+      target: { selectionStart: 4, value: "/sum" },
+    });
+    expect(
+      await screen.findByRole("option", { name: /Summarise room/i }),
+    ).toBeTruthy();
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect((composer as HTMLTextAreaElement).value).toContain("@Bluplai");
+    expect((composer as HTMLTextAreaElement).value).toContain(
+      "decisions, risks and next actions",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Emoji" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search emoji" }), {
+      target: { value: "rocket" },
+    });
+    fireEvent.click(screen.getByRole("option", { name: "rocket" }));
+    expect((composer as HTMLTextAreaElement).value).toContain("🚀");
+  });
+
+  it("searches and sends GIFs through the host-owned provider", async () => {
+    const { commands, transport } = createTransport(interactiveWorkspace);
+    const searchGifs = vi.fn(async () => [
+      {
+        id: "celebrate",
+        title: "Celebrate",
+        url: "https://media.giphy.com/media/celebrate/giphy.gif",
+        previewUrl: "https://media.giphy.com/media/celebrate/preview.gif",
+      },
+    ]);
+    render(<BluplaiChat searchGifs={searchGifs} transport={transport} />);
+    await screen.findByRole("combobox", { name: "Message General" });
+
+    fireEvent.click(screen.getByRole("button", { name: "GIF" }));
+    expect(await screen.findByAltText("Celebrate")).toBeTruthy();
+    expect(searchGifs).toHaveBeenCalledWith("", expect.any(AbortSignal));
+    fireEvent.click(screen.getByAltText("Celebrate"));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(
+        commands.find((command) => command.type === "chat.send-message"),
+      ).toEqual({
+        type: "chat.send-message",
+        roomId: "room-general",
+        body: "https://media.giphy.com/media/celebrate/giphy.gif",
+        attachments: [],
+      }),
+    );
+  });
+
+  it("persists room drafts and applies writing language direction", async () => {
+    const first = createTransport(interactiveWorkspace);
+    const mounted = render(<BluplaiChat transport={first.transport} />);
+    const composer = await screen.findByRole("combobox", {
+      name: "Message General",
+    });
+    fireEvent.change(composer, { target: { value: "A durable draft" } });
+    mounted.unmount();
+
+    const second = createTransport(interactiveWorkspace);
+    render(<BluplaiChat transport={second.transport} />);
+    const restored = await screen.findByRole("combobox", {
+      name: "Message General",
+    });
+    expect((restored as HTMLTextAreaElement).value).toBe("A durable draft");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Writing language: Auto-detect" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /العربيةArabic/i }));
+    expect(restored.getAttribute("dir")).toBe("rtl");
+    expect(restored.getAttribute("lang")).toBe("ar");
   });
 
   it("uses server-backed search when the host exposes history search", async () => {
@@ -396,7 +624,7 @@ describe("React 18 host compatibility", () => {
     }));
     render(<BluplaiChat transport={transport} />);
 
-    await screen.findByRole("textbox", { name: "Message General" });
+    await screen.findByRole("combobox", { name: "Message General" });
     const input =
       document.querySelector<HTMLInputElement>('input[type="file"]');
     if (!input) throw new Error("attachment input was not rendered");
@@ -495,7 +723,7 @@ describe("React 18 host compatibility", () => {
       return new Promise<ChatAttachment>(() => undefined);
     });
     const mounted = render(<BluplaiChat transport={transport} />);
-    await screen.findByRole("textbox", { name: "Message General" });
+    await screen.findByRole("combobox", { name: "Message General" });
     const input =
       document.querySelector<HTMLInputElement>('input[type="file"]');
     if (!input) throw new Error("attachment input was not rendered");
@@ -559,7 +787,7 @@ describe("React 18 host compatibility", () => {
 
     await screen.findByRole("heading", { name: "General" });
     expect(
-      screen.queryByRole("textbox", { name: "Message General" }),
+      screen.queryByRole("combobox", { name: "Message General" }),
     ).toBeNull();
     expect(screen.queryByLabelText("Attach file")).toBeNull();
     expect(screen.queryByRole("button", { name: "Create channel" })).toBeNull();
