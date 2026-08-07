@@ -63,6 +63,7 @@ pub async fn provision_managed_room(
         let refs = members.iter().map(Vec::as_slice).collect::<Vec<_>>();
         crate::dm::compute_participant_hash(&refs).to_vec()
     });
+    let owner_hex = hex::encode(owner_pubkey);
 
     let mut tx = pool.begin().await?;
     let created = sqlx::query(
@@ -113,6 +114,23 @@ pub async fn provision_managed_room(
     // owns raw administration, so a Bluplai owner/admin never gains a relay
     // owner role that would outlive Bluplai revocation.
     for member in &members {
+        let member_hex = hex::encode(member);
+        // Managed Nostr keys are server-held, but closed relays still require
+        // tenant-scoped relay admission before NIP-42 authentication. Keep
+        // existing owner/admin roles intact if this pubkey was already known.
+        sqlx::query(
+            r#"
+            INSERT INTO relay_members
+                (community_id, pubkey, role, added_by)
+            VALUES ($1, $2, 'member', $3)
+            ON CONFLICT (community_id, pubkey) DO NOTHING
+            "#,
+        )
+        .bind(community_id.as_uuid())
+        .bind(&member_hex)
+        .bind(&owner_hex)
+        .execute(&mut *tx)
+        .await?;
         sqlx::query(
             r#"
             INSERT INTO channel_members
@@ -194,6 +212,21 @@ pub async fn project_member(
                     ));
                 }
             }
+            let member_hex = hex::encode(member_pubkey);
+            let operator_hex = hex::encode(operator_pubkey);
+            sqlx::query(
+                r#"
+                INSERT INTO relay_members
+                    (community_id, pubkey, role, added_by)
+                VALUES ($1, $2, 'member', $3)
+                ON CONFLICT (community_id, pubkey) DO NOTHING
+                "#,
+            )
+            .bind(community_id.as_uuid())
+            .bind(&member_hex)
+            .bind(&operator_hex)
+            .execute(&mut *tx)
+            .await?;
             sqlx::query(
                 r#"
                 INSERT INTO channel_members
@@ -225,6 +258,26 @@ pub async fn project_member(
             .bind(operator_pubkey)
             .bind(community_id.as_uuid())
             .bind(channel_id)
+            .bind(member_pubkey)
+            .execute(&mut *tx)
+            .await?;
+            let member_hex = hex::encode(member_pubkey);
+            sqlx::query(
+                r#"
+                DELETE FROM relay_members AS relay
+                WHERE relay.community_id=$1
+                  AND relay.pubkey=$2
+                  AND relay.role='member'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM channel_members AS channel
+                    WHERE channel.community_id=relay.community_id
+                      AND channel.pubkey=$3
+                      AND channel.removed_at IS NULL
+                  )
+                "#,
+            )
+            .bind(community_id.as_uuid())
+            .bind(&member_hex)
             .bind(member_pubkey)
             .execute(&mut *tx)
             .await?;
@@ -303,6 +356,20 @@ mod tests {
                 (peer.clone(), "member".into(), true),
             ]
         );
+        let relay_rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT pubkey, role FROM relay_members WHERE community_id=$1 ORDER BY pubkey",
+        )
+        .bind(community_uuid)
+        .fetch_all(&pool)
+        .await
+        .expect("read relay members");
+        assert_eq!(
+            relay_rows,
+            vec![
+                (hex::encode(&owner), "member".into()),
+                (hex::encode(&peer), "member".into()),
+            ]
+        );
 
         let denied = project_member(
             &pool,
@@ -327,6 +394,15 @@ mod tests {
         )
         .await
         .expect("revoke original participant");
+        let peer_is_relay_member: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM relay_members WHERE community_id=$1 AND pubkey=$2)",
+        )
+        .bind(community_uuid)
+        .bind(hex::encode(&peer))
+        .fetch_one(&pool)
+        .await
+        .expect("read revoked relay member");
+        assert!(!peer_is_relay_member);
         project_member(
             &pool,
             community,
@@ -338,6 +414,15 @@ mod tests {
         )
         .await
         .expect("restore original participant");
+        let peer_is_relay_member: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM relay_members WHERE community_id=$1 AND pubkey=$2)",
+        )
+        .bind(community_uuid)
+        .bind(hex::encode(&peer))
+        .fetch_one(&pool)
+        .await
+        .expect("read restored relay member");
+        assert!(peer_is_relay_member);
 
         sqlx::query("DELETE FROM channels WHERE community_id=$1")
             .bind(community_uuid)
