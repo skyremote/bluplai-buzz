@@ -30,6 +30,7 @@ export type {
   ChatCommand,
   ChatCommandResult,
   ChatHistoryLoadResult,
+  ChatGif,
   ChatMessage,
   ChatMember,
   ChatReaction,

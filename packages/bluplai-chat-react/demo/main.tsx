@@ -134,6 +134,27 @@ const transport: BuzzChatTransport = {
   }),
 };
 
+const demoGifs = [
+  {
+    id: "demo-celebrate",
+    title: "Celebrate",
+    url: "https://media.giphy.com/media/26BRuo6sLetdllPAQ/giphy.gif",
+    previewUrl: "https://media.giphy.com/media/26BRuo6sLetdllPAQ/giphy.gif",
+  },
+  {
+    id: "demo-approved",
+    title: "Approved",
+    url: "https://media.giphy.com/media/111ebonMs90YLu/giphy.gif",
+    previewUrl: "https://media.giphy.com/media/111ebonMs90YLu/giphy.gif",
+  },
+  {
+    id: "demo-yes",
+    title: "Yes",
+    url: "https://media.giphy.com/media/nXxOjZrbnbRxS/giphy.gif",
+    previewUrl: "https://media.giphy.com/media/nXxOjZrbnbRxS/giphy.gif",
+  },
+];
+
 function App() {
   return (
     <div className="demo-shell">
@@ -207,6 +228,11 @@ function App() {
                 </span>
               </div>
             </div>
+          }
+          searchGifs={async (query) =>
+            demoGifs.filter((gif) =>
+              gif.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+            )
           }
           showRoomList={false}
           transport={transport}

@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatReadState } from "../transport/types";
 import { ChatIcon } from "./ChatIcon";
+import { MessageContent } from "./MessageContent";
 
 function isMessageRead(
   message: ChatMessage,
@@ -24,6 +25,7 @@ export interface MessageItemProps {
   readState?: ChatReadState;
   compact?: boolean;
   threadReplyCount?: number;
+  mentionNames?: string[];
   onReact?: (message: ChatMessage, emoji: string) => void;
   onOpenThread?: (message: ChatMessage) => void;
 }
@@ -33,6 +35,7 @@ export function MessageItem({
   readState,
   compact,
   threadReplyCount = 0,
+  mentionNames,
   onReact,
   onOpenThread,
 }: MessageItemProps) {
@@ -85,7 +88,7 @@ export function MessageItem({
             </span>
           ) : null}
         </header>
-        <p>{message.body}</p>
+        <MessageContent body={message.body} mentionNames={mentionNames} />
         {message.attachments?.length ? (
           <div className="bluplai-chat__attachments">
             {message.attachments.map((attachment) => (
