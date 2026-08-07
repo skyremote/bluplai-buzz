@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { executeChatCommand } from "./capabilities";
 import { Composer, type ComposerSubmit } from "./components/Composer";
+import { ChatIcon } from "./components/ChatIcon";
 import { MessageItem } from "./components/MessageItem";
 import { RoomList } from "./components/RoomList";
 import { SearchPanel } from "./components/SearchPanel";
@@ -24,7 +25,10 @@ export interface BluplaiChatProps {
   onRoomChange?: (room: ChatRoom) => void;
   onCreateRoom?: () => void;
   onCreateDm?: () => void;
+  onOpenRoomList?: () => void;
   onManageMembers?: (room: ChatRoom) => void;
+  /** Host-owned context shown between the room header and message history. */
+  roomContext?: ReactNode;
   onNotificationPreferenceChange?: (
     room: ChatRoom,
     preference: "all" | "mentions" | "muted",
@@ -87,7 +91,9 @@ export function BluplaiChat({
   onRoomChange,
   onCreateRoom,
   onCreateDm,
+  onOpenRoomList,
   onManageMembers,
+  roomContext,
   onNotificationPreferenceChange,
 }: BluplaiChatProps) {
   const [workspace, setWorkspace] = useState<WorkspaceState>({
@@ -100,6 +106,9 @@ export function BluplaiChat({
   const [serverSearchMessages, setServerSearchMessages] = useState<
     ChatMessage[]
   >([]);
+  const [searchStatus, setSearchStatus] = useState<
+    "idle" | "loading" | "error"
+  >("idle");
   const [searchContextMessages, setSearchContextMessages] = useState<
     ChatMessage[]
   >([]);
@@ -112,6 +121,9 @@ export function BluplaiChat({
   const [historyError, setHistoryError] = useState<string | null>(null);
   const searchNavigationController = useRef<AbortController | null>(null);
   const historyController = useRef<AbortController | null>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
+  const searchCloseButton = useRef<HTMLButtonElement | null>(null);
+  const threadCloseButton = useRef<HTMLButtonElement | null>(null);
   const lastMarkedRead = useRef<string | null>(null);
   const initialRoomIdRef = useRef(initialRoomId);
   const uploadAttachment = transport.uploadAttachment?.bind(transport);
@@ -226,16 +238,24 @@ export function BluplaiChat({
     const query = searchQuery.trim();
     if (!searchOpen || !searchRoomId || !search || !query) {
       setServerSearchMessages([]);
+      setSearchStatus("idle");
       return;
     }
     const controller = new AbortController();
+    setSearchStatus("loading");
     const timer = window.setTimeout(() => {
       void search(searchRoomId, query, controller.signal)
         .then((messages) => {
-          if (!controller.signal.aborted) setServerSearchMessages(messages);
+          if (!controller.signal.aborted) {
+            setServerSearchMessages(messages);
+            setSearchStatus("idle");
+          }
         })
         .catch(() => {
-          if (!controller.signal.aborted) setServerSearchMessages([]);
+          if (!controller.signal.aborted) {
+            setServerSearchMessages([]);
+            setSearchStatus("error");
+          }
         });
     }, 150);
     return () => {
@@ -243,6 +263,38 @@ export function BluplaiChat({
       controller.abort();
     };
   }, [searchOpen, searchQuery, searchRoomId, transport]);
+
+  useEffect(() => {
+    if (threadRoot) threadCloseButton.current?.focus();
+    else if (searchOpen) searchCloseButton.current?.focus();
+  }, [searchOpen, threadRoot]);
+
+  const rememberFocus = () => {
+    previousFocus.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+  };
+
+  const restoreFocus = () => {
+    window.requestAnimationFrame(() => previousFocus.current?.focus());
+  };
+
+  const closeThread = () => {
+    setThreadRoot(null);
+    restoreFocus();
+  };
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    restoreFocus();
+  };
+
+  const openThread = (message: ChatMessage) => {
+    rememberFocus();
+    setThreadRoot(message);
+  };
 
   useEffect(() => {
     if (
@@ -337,12 +389,19 @@ export function BluplaiChat({
         .filter(Boolean)
         .join(" ")}
     >
-      <header className="bluplai-chat__brand">
-        <h2 aria-label="Bluplai Chat, powered by Buzz">
-          <span>Bluplai Chat</span>
-          <span>powered by Buzz</span>
-        </h2>
-      </header>
+      {mode === "rail" ? (
+        <header className="bluplai-chat__brand">
+          <div className="bluplai-chat__brand-mark">
+            <ChatIcon name="message" />
+          </div>
+          <h2 aria-label="Bluplai Chat, powered by Buzz">
+            <span>Bluplai Chat</span>
+            <span>Powered by Buzz</span>
+          </h2>
+        </header>
+      ) : (
+        <h2 className="bluplai-chat__sr-only">Bluplai Chat, powered by Buzz</h2>
+      )}
       {workspace.status === "loading" ? (
         <p aria-live="polite" className="bluplai-chat__state">
           Loading Bluplai Chat…
@@ -373,52 +432,118 @@ export function BluplaiChat({
           {projection ? (
             <main className="bluplai-chat__timeline">
               <header className="bluplai-chat__room-header">
-                <div>
-                  <h1>{projection.room.name}</h1>
+                {onOpenRoomList ? (
+                  <button
+                    aria-label="Open channels and direct messages"
+                    className="bluplai-chat__mobile-room-menu"
+                    onClick={onOpenRoomList}
+                    type="button"
+                  >
+                    <ChatIcon name="message" />
+                  </button>
+                ) : null}
+                <div className="bluplai-chat__room-heading">
+                  <div className="bluplai-chat__room-title-row">
+                    <span className="bluplai-chat__room-title-icon">
+                      <ChatIcon
+                        name={
+                          projection.room.disclosureScope === "private"
+                            ? "lock"
+                            : projection.room.disclosureScope === "dm"
+                              ? "at"
+                              : "hash"
+                        }
+                      />
+                    </span>
+                    <h1>{projection.room.name}</h1>
+                  </div>
                   {projection.room.topic ? (
                     <p>{projection.room.topic}</p>
                   ) : null}
                 </div>
                 <div className="bluplai-chat__room-actions">
-                  <span title="Members online">
-                    {
-                      projection.members.filter(
-                        (member) => member.presence === "online",
-                      ).length
-                    }
-                    /{projection.members.length} online
-                  </span>
-                  <button onClick={() => setSearchOpen(true)} type="button">
-                    Search
+                  {projection.members.length ? (
+                    <div
+                      className="bluplai-chat__member-stack"
+                      title={`${projection.members.filter((member) => member.presence === "online").length} of ${projection.members.length} members online`}
+                    >
+                      <span className="bluplai-chat__sr-only">
+                        {
+                          projection.members.filter(
+                            (member) => member.presence === "online",
+                          ).length
+                        }
+                        /{projection.members.length} online
+                      </span>
+                      {projection.members.slice(0, 3).map((member) => (
+                        <span
+                          className="bluplai-chat__member-avatar"
+                          key={member.id}
+                        >
+                          {member.avatarUrl ? (
+                            <img alt="" src={member.avatarUrl} />
+                          ) : (
+                            member.displayName.slice(0, 1).toUpperCase()
+                          )}
+                          <i data-presence={member.presence} />
+                        </span>
+                      ))}
+                      <span className="bluplai-chat__member-count">
+                        {projection.members.length}
+                      </span>
+                    </div>
+                  ) : null}
+                  <button
+                    aria-label="Search"
+                    onClick={() => {
+                      rememberFocus();
+                      setSearchOpen(true);
+                    }}
+                    title="Search conversation"
+                    type="button"
+                  >
+                    <ChatIcon name="search" />
                   </button>
                   {!readOnly &&
                   onManageMembers &&
                   projection.room.canManageMembers ? (
                     <button
+                      aria-label="Members"
                       onClick={() => onManageMembers(projection.room)}
+                      title="Manage members"
                       type="button"
                     >
-                      Members
+                      <ChatIcon name="members" />
                     </button>
                   ) : null}
                   {!readOnly && onNotificationPreferenceChange ? (
-                    <select
-                      aria-label="Notification preference"
-                      onChange={(event) =>
-                        void onNotificationPreferenceChange(
-                          projection.room,
-                          event.target.value as "all" | "mentions" | "muted",
-                        )
-                      }
-                      value={projection.room.notificationPreference ?? "all"}
+                    <label
+                      className="bluplai-chat__notification-select"
+                      title="Notification preference"
                     >
-                      <option value="all">All messages</option>
-                      <option value="mentions">Mentions</option>
-                      <option value="muted">Muted</option>
-                    </select>
+                      <ChatIcon name="bell" />
+                      <select
+                        aria-label="Notification preference"
+                        onChange={(event) =>
+                          void onNotificationPreferenceChange(
+                            projection.room,
+                            event.target.value as "all" | "mentions" | "muted",
+                          )
+                        }
+                        value={projection.room.notificationPreference ?? "all"}
+                      >
+                        <option value="all">All messages</option>
+                        <option value="mentions">Mentions only</option>
+                        <option value="muted">Muted</option>
+                      </select>
+                      <ChatIcon name="chevron-down" />
+                    </label>
                   ) : null}
                 </div>
               </header>
+              {roomContext ? (
+                <div className="bluplai-chat__room-context">{roomContext}</div>
+              ) : null}
               <div className="bluplai-chat__message-stream">
                 {loadOlderMessages &&
                 (historyHasMoreOverride[projection.room.id] ??
@@ -477,7 +602,7 @@ export function BluplaiChat({
                       !readOnly ||
                       (projection.repliesByRoot.get(message.id)?.length ?? 0) >
                         0
-                        ? setThreadRoot
+                        ? openThread
                         : undefined
                     }
                     onReact={
@@ -531,15 +656,19 @@ export function BluplaiChat({
             <aside
               aria-label={`Thread replies to ${threadRoot.body}`}
               className="bluplai-chat__thread-panel"
+              onKeyDown={(event) => {
+                if (event.key === "Escape") closeThread();
+              }}
             >
               <header>
                 <strong>Thread</strong>
                 <button
                   aria-label="Close thread"
-                  onClick={() => setThreadRoot(null)}
+                  onClick={closeThread}
+                  ref={threadCloseButton}
                   type="button"
                 >
-                  ×
+                  <ChatIcon name="x" />
                 </button>
               </header>
               <MessageItem
@@ -566,7 +695,7 @@ export function BluplaiChat({
               {!readOnly ? (
                 <Composer
                   compact
-                  onCancelReply={() => setThreadRoot(null)}
+                  onCancelReply={closeThread}
                   onSubmit={send}
                   onTypingChange={
                     setTyping
@@ -597,10 +726,9 @@ export function BluplaiChat({
                   ? serverSearchMessages
                   : projection.messages
               }
-              onClose={() => {
-                setSearchOpen(false);
-                setSearchQuery("");
-              }}
+              closeButtonRef={searchCloseButton}
+              onClose={closeSearch}
+              onEscape={closeSearch}
               onQueryChange={setSearchQuery}
               onSelect={(message) => {
                 void (async () => {
@@ -648,6 +776,7 @@ export function BluplaiChat({
                 })();
               }}
               query={searchQuery}
+              status={transport.searchMessages ? searchStatus : "idle"}
             />
           ) : null}
         </div>

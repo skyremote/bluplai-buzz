@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bluplai Chat UI review</title>
+    <style>
+      :root { --primary: 226 69% 52%; --foreground: 228 22% 9%; --card: 0 0% 100%; --border: 220 14% 89%; --muted: 220 18% 95%; --muted-foreground: 221 10% 37%; --sidebar-background: 220 22% 97%; --destructive: 0 68% 46%; }
+      * { box-sizing: border-box; }
+      html, body, #root { height: 100%; margin: 0; }
+      body { background: #f4f5f8; color: #12141c; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+      button { font: inherit; }
+      .demo-shell { display: grid; grid-template-columns: 64px 240px minmax(0, 1fr); height: 100%; }
+      .demo-icon-rail { align-items: center; background: #18233f; color: white; display: flex; flex-direction: column; gap: 14px; padding-top: 14px; }
+      .demo-room-rail { border-right: 1px solid #e1e5ec; min-width: 0; }
+      @media (max-width: 700px) {
+        .demo-shell { grid-template-columns: minmax(0, 1fr); }
+        .demo-icon-rail, .demo-room-rail { display: none; }
+      }
+    </style>
+  </head>
+  <body><div id="root"></div><script type="module" src="/main.tsx"></script></body>
+</html>

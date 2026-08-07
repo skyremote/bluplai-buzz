@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatAttachment } from "../transport/types";
+import { ChatIcon } from "./ChatIcon";
 
 export interface ComposerSubmit {
   body: string;
@@ -109,7 +110,7 @@ export function Composer({
             onClick={onCancelReply}
             type="button"
           >
-            ×
+            <ChatIcon name="x" />
           </button>
         </div>
       ) : null}
@@ -127,13 +128,13 @@ export function Composer({
                 }
                 type="button"
               >
-                ×
+                <ChatIcon name="x" />
               </button>
             </span>
           ))}
         </div>
       ) : null}
-      <div className="bluplai-chat__composer-row">
+      <div className="bluplai-chat__composer-shell">
         <textarea
           aria-label={`Message ${roomName}`}
           disabled={disabled || submitting}
@@ -152,29 +153,40 @@ export function Composer({
           rows={compact ? 1 : 2}
           value={body}
         />
-        {onUpload ? (
-          <label className="bluplai-chat__upload-button">
-            <span aria-hidden="true">＋</span>
-            <span className="bluplai-chat__sr-only">Attach file</span>
-            <input
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void upload(file);
-                event.currentTarget.value = "";
-              }}
-              type="file"
-            />
-          </label>
-        ) : null}
-        <button
-          disabled={
-            disabled || submitting || (!body.trim() && attachments.length === 0)
-          }
-          onClick={() => void submit()}
-          type="button"
-        >
-          {submitting ? "Sending…" : "Send"}
-        </button>
+        <div className="bluplai-chat__composer-toolbar">
+          <div>
+            {onUpload ? (
+              <label className="bluplai-chat__composer-icon-button">
+                <ChatIcon name="paperclip" />
+                <span className="bluplai-chat__sr-only">Attach file</span>
+                <input
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void upload(file);
+                    event.currentTarget.value = "";
+                  }}
+                  type="file"
+                />
+              </label>
+            ) : null}
+            <span className="bluplai-chat__composer-hint">
+              Enter to send · Shift + Enter for a new line
+            </span>
+          </div>
+          <button
+            aria-label={submitting ? "Sending…" : "Send"}
+            disabled={
+              disabled ||
+              submitting ||
+              (!body.trim() && attachments.length === 0)
+            }
+            onClick={() => void submit()}
+            type="button"
+          >
+            <span>{submitting ? "Sending…" : "Send"}</span>
+            <ChatIcon name="send" />
+          </button>
+        </div>
       </div>
       {error ? <p role="alert">{error}</p> : null}
     </div>
