@@ -1,4 +1,5 @@
 import type { ChatRoom } from "../transport/types";
+import { ChatIcon, type ChatIconName } from "./ChatIcon";
 
 export interface RoomListProps {
   rooms: ChatRoom[];
@@ -9,11 +10,11 @@ export interface RoomListProps {
   onCreateDm?: () => void;
 }
 
-function scopeIcon(room: ChatRoom): string {
-  if (room.disclosureScope === "dm") return "◉";
-  if (room.disclosureScope === "private") return "◆";
-  if (room.disclosureScope === "shared") return "◎";
-  return "#";
+function scopeIcon(room: ChatRoom): ChatIconName {
+  if (room.disclosureScope === "dm") return "at";
+  if (room.disclosureScope === "private") return "lock";
+  if (room.disclosureScope === "shared") return "members";
+  return "hash";
 }
 
 function roomButtonLabel(room: ChatRoom): string {
@@ -42,7 +43,7 @@ export function RoomList({
         type="button"
       >
         <span aria-hidden="true" className="bluplai-chat__room-icon">
-          {scopeIcon(room)}
+          <ChatIcon name={scopeIcon(room)} />
         </span>
         <span className="bluplai-chat__room-name">{room.name}</span>
         {room.unreadCount > 0 ? (
@@ -71,7 +72,7 @@ export function RoomList({
             onClick={onCreateRoom}
             type="button"
           >
-            +
+            <ChatIcon name="plus" />
           </button>
         ) : null}
       </div>
@@ -84,7 +85,7 @@ export function RoomList({
             onClick={onCreateDm}
             type="button"
           >
-            +
+            <ChatIcon name="plus" />
           </button>
         ) : null}
       </div>
