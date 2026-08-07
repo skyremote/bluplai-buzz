@@ -1,0 +1,58 @@
+name: Bluplai browser compatibility
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/bluplai-compatibility.yml"
+      - "packages/bluplai-chat-react/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bluplai-compatibility.yml"
+      - "packages/bluplai-chat-react/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+  workflow_dispatch:
+
+concurrency:
+  group: bluplai-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  react-18-host:
+    name: React 18 browser package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout pinned source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Activate pinned toolchain
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check browser and type boundaries
+        run: pnpm --filter @bluplai/buzz-chat-react check
+      - name: Test React 18 host behavior
+        run: pnpm --filter @bluplai/buzz-chat-react test
+      - name: Build production package
+        run: pnpm --filter @bluplai/buzz-chat-react build
+      - name: Pack commit-addressed prerelease
+        run: |
+          mkdir -p "$RUNNER_TEMP/bluplai-chat-package"
+          pnpm --filter @bluplai/buzz-chat-react pack \
+            --pack-destination "$RUNNER_TEMP/bluplai-chat-package"
+      - name: Upload immutable host-test artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: bluplai-buzz-chat-react-${{ github.sha }}
+          path: ${{ runner.temp }}/bluplai-chat-package/*.tgz
+          if-no-files-found: error
+          retention-days: 30

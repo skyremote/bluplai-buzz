@@ -15,6 +15,12 @@ pub mod admin_moderation;
 pub mod api_token;
 /// Relay-scoped archived identity persistence (NIP-IA).
 pub mod archived_identities;
+/// Optional Bluplai room-scoped media ACL persistence.
+pub mod bluplai_media_acl;
+/// Operator-authorized Bluplai desired-membership projection.
+pub mod bluplai_membership;
+/// Durable Bluplai-visible event outbox.
+pub mod bluplai_visible_outbox;
 /// Channel and membership persistence.
 pub mod channel;
 /// Direct message channel persistence.
@@ -27,6 +33,8 @@ pub mod event;
 pub mod feed;
 /// Git repository name registry (NIP-34 kind:30617).
 pub mod git_repo;
+/// Dedicated unarmed, transactional Bluplai historical importer.
+pub mod historical_import;
 /// Embedded database migrations.
 pub mod migration;
 /// Community moderation: reports, bans/timeouts, audit actions.
@@ -545,6 +553,140 @@ impl Default for DbConfig {
             idle_timeout_secs: 600,
             replica_read_max_age_ms: 0,
         }
+    }
+}
+
+/// Narrow writer-only database handle for offline historical event recovery.
+///
+/// Unlike [`Db`], every connection deliberately leaves the migration-0021
+/// `buzz.created_at_floor` GUC unset so an operator can restore signed events
+/// older than the live ingest envelope. This handle has no read-replica pool,
+/// exposes no routed-read API, and must only be constructed while the external
+/// recovery breaker is closed and normal writers are stopped.
+pub struct EventRecoveryDb {
+    pool: PgPool,
+    _closed_replica_fence: std::sync::Arc<replica_fence::ReplicaFence>,
+}
+
+impl EventRecoveryDb {
+    /// Connect a dedicated unarmed writer pool for offline event recovery.
+    ///
+    /// A configured read-replica URL is rejected rather than ignored. Every
+    /// pooled session proves it is a writable primary and explicitly clears
+    /// `buzz.created_at_floor`; this never changes [`Db::new`] or its armed
+    /// writer sessions.
+    pub async fn connect(config: &DbConfig) -> Result<Self> {
+        if config
+            .read_database_url
+            .as_deref()
+            .is_some_and(|url| !url.trim().is_empty())
+        {
+            return Err(DbError::InvalidData(
+                "historical event recovery forbids a read-replica pool".to_string(),
+            ));
+        }
+
+        let pool = PgPoolOptions::new()
+            .max_connections(config.max_connections)
+            .min_connections(config.min_connections)
+            .acquire_timeout(Duration::from_secs(config.acquire_timeout_secs))
+            .max_lifetime(Duration::from_secs(config.max_lifetime_secs))
+            .idle_timeout(Duration::from_secs(config.idle_timeout_secs))
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    let is_writable_primary: bool = sqlx::query_scalar(
+                        "SELECT NOT pg_is_in_recovery() \
+                         AND current_setting('transaction_read_only') = 'off'",
+                    )
+                    .fetch_one(&mut *conn)
+                    .await?;
+                    if !is_writable_primary {
+                        return Err(sqlx::Error::Protocol(
+                            "historical event recovery requires a writable primary".to_string(),
+                        ));
+                    }
+                    sqlx::query("SELECT set_config('buzz.created_at_floor', '', false)")
+                        .execute(&mut *conn)
+                        .await?;
+                    Ok(())
+                })
+            })
+            .connect(&config.database_url)
+            .await?;
+
+        let closed_replica_fence = std::sync::Arc::new(replica_fence::ReplicaFence::new());
+        if closed_replica_fence.verified_through().is_some() {
+            return Err(DbError::InvalidData(
+                "historical event recovery replica fence is not closed".to_string(),
+            ));
+        }
+        Ok(Self {
+            pool,
+            _closed_replica_fence: closed_replica_fence,
+        })
+    }
+
+    /// Resolve an active community exclusively from its canonical host.
+    pub async fn lookup_community_by_host(
+        &self,
+        normalized_host: &str,
+    ) -> Result<Option<CommunityRecord>> {
+        let row = sqlx::query(
+            "SELECT id, host FROM communities \
+             WHERE lower(host) = lower($1) AND archived_at IS NULL",
+        )
+        .bind(normalized_host)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| {
+            Ok(CommunityRecord {
+                id: CommunityId::from_uuid(row.try_get("id")?),
+                host: row.try_get("host")?,
+            })
+        })
+        .transpose()
+    }
+
+    /// Fetch a channel in the server-resolved community.
+    pub async fn get_channel(
+        &self,
+        community_id: CommunityId,
+        channel_id: Uuid,
+    ) -> Result<channel::ChannelRecord> {
+        channel::get_channel(&self.pool, community_id, channel_id).await
+    }
+
+    /// Fetch an active stored event by community-scoped event ID.
+    pub async fn get_event_by_id(
+        &self,
+        community_id: CommunityId,
+        id_bytes: &[u8],
+    ) -> Result<Option<StoredEvent>> {
+        event::get_event_by_id(&self.pool, community_id, id_bytes).await
+    }
+
+    /// Fetch a stored event including a soft-deleted row.
+    pub async fn get_event_by_id_including_deleted(
+        &self,
+        community_id: CommunityId,
+        id_bytes: &[u8],
+    ) -> Result<Option<StoredEvent>> {
+        event::get_event_by_id_including_deleted(&self.pool, community_id, id_bytes).await
+    }
+
+    /// Insert one verified historical event without the live created-at floor.
+    ///
+    /// The shared event-row helper preserves community-scoped idempotency and
+    /// never updates an existing event row. Recovery deliberately does not
+    /// populate derived mention or other projection tables; operators must
+    /// rebuild and reconcile those independently before cutover.
+    pub async fn insert_event(
+        &self,
+        community_id: CommunityId,
+        event: &nostr::Event,
+        channel_id: Uuid,
+    ) -> Result<(StoredEvent, bool)> {
+        event::insert_event(&self.pool, community_id, event, Some(channel_id)).await
     }
 }
 
@@ -2123,6 +2265,129 @@ impl Db {
             }
         }
         Ok(outcome)
+    }
+
+    /// Bind a verified upload hash to one Bluplai room.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn bind_bluplai_room_media(
+        &self,
+        community_id: CommunityId,
+        sha256: &[u8],
+        channel_id: Uuid,
+        uploader_pubkey: &[u8],
+        byte_size: i64,
+        content_type: Option<&str>,
+    ) -> Result<bool> {
+        bluplai_media_acl::bind_room_media(
+            &self.pool,
+            community_id,
+            sha256,
+            channel_id,
+            uploader_pubkey,
+            byte_size,
+            content_type,
+        )
+        .await
+    }
+
+    /// Return the protected room for a Bluplai-bound media hash.
+    pub async fn bluplai_protected_media_room(
+        &self,
+        community_id: CommunityId,
+        sha256: &[u8],
+    ) -> Result<Option<Uuid>> {
+        bluplai_media_acl::protected_media_room(&self.pool, community_id, sha256).await
+    }
+
+    /// Revalidate current room membership for protected media.
+    pub async fn can_read_bluplai_protected_media(
+        &self,
+        community_id: CommunityId,
+        sha256: &[u8],
+        reader_pubkey: &[u8],
+    ) -> Result<bool> {
+        bluplai_media_acl::can_read_protected_media(&self.pool, community_id, sha256, reader_pubkey)
+            .await
+    }
+
+    /// Apply one idempotent Bluplai desired-membership projection.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn project_bluplai_member(
+        &self,
+        community_id: CommunityId,
+        channel_id: Uuid,
+        member_pubkey: &[u8],
+        operation: &str,
+        role: channel::MemberRole,
+        operator_pubkey: &[u8],
+    ) -> Result<()> {
+        bluplai_membership::project_member(
+            &self.pool,
+            community_id,
+            channel_id,
+            member_pubkey,
+            operation,
+            role,
+            operator_pubkey,
+        )
+        .await
+    }
+
+    /// Atomically provision one private managed room.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn provision_bluplai_managed_room(
+        &self,
+        community_id: CommunityId,
+        channel_id: Uuid,
+        name: &str,
+        disclosure_scope: &str,
+        owner_pubkey: &[u8],
+        member_pubkeys: &[Vec<u8>],
+    ) -> Result<bool> {
+        bluplai_membership::provision_managed_room(
+            &self.pool,
+            community_id,
+            channel_id,
+            name,
+            disclosure_scope,
+            owner_pubkey,
+            member_pubkeys,
+        )
+        .await
+    }
+
+    /// Claim a bounded batch of committed Bluplai-visible events.
+    pub async fn claim_bluplai_visible_events(
+        &self,
+        community_id: CommunityId,
+        limit: i64,
+    ) -> Result<Vec<bluplai_visible_outbox::ClaimedVisibleEvent>> {
+        bluplai_visible_outbox::claim_visible_events(&self.pool, community_id, limit).await
+    }
+
+    /// Mark a private channel as managed by the Bluplai integration.
+    pub async fn mark_bluplai_managed_room(
+        &self,
+        community_id: CommunityId,
+        channel_id: Uuid,
+        disclosure_scope: &str,
+    ) -> Result<()> {
+        bluplai_visible_outbox::mark_managed_room(
+            &self.pool,
+            community_id,
+            channel_id,
+            disclosure_scope,
+        )
+        .await
+    }
+
+    /// Mark one Bluplai-visible event consumed after its remote journal commit.
+    pub async fn complete_bluplai_visible_event(
+        &self,
+        community_id: CommunityId,
+        id: Uuid,
+    ) -> Result<()> {
+        bluplai_visible_outbox::complete_visible_event(&self.pool, community_id, id).await
     }
 
     /// Creates a new channel, bootstraps the creator as owner, and returns the record.

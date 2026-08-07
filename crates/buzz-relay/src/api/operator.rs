@@ -52,6 +52,42 @@ struct TransferCommunityResponse {
     previous_owner: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+/// Operator request to create one private Bluplai-managed room.
+pub struct ProvisionBluplaiRoomRequest {
+    community_id: String,
+    room_id: String,
+    name: String,
+    disclosure_scope: String,
+    owner_pubkey: String,
+    #[serde(default)]
+    member_pubkeys: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+/// Operator request to apply one desired member projection.
+pub struct ProjectBluplaiMembershipRequest {
+    community_id: String,
+    room_id: String,
+    member_pubkey: String,
+    operation: String,
+    role: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+/// Bounded visible-event claim query for one community.
+pub struct BluplaiVisibleEventsQuery {
+    community_id: String,
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+/// Completion acknowledgement after Bluplai durably journals an event.
+pub struct CompleteBluplaiVisibleEventRequest {
+    community_id: String,
+    outbox_id: String,
+}
+
 const OPERATOR_REPLAY_SCOPE: &str = "operator-management";
 
 /// Shared deployment-global operator auth prelude. The canonical management
@@ -132,6 +168,170 @@ async fn check_operator_replay(
             ))
         }
     }
+}
+
+/// Idempotently create one private Buzz room for an authoritative Bluplai binding.
+pub async fn provision_bluplai_room(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    const PATH: &str = "/operator/bluplai/rooms";
+    authorize_operator_request(&state, &headers, "POST", PATH, None, Some(&body)).await?;
+    let request: ProvisionBluplaiRoomRequest = serde_json::from_slice(&body)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid Bluplai room request"))?;
+    let community_id = Uuid::parse_str(&request.community_id)
+        .map(CommunityId::from_uuid)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid community id"))?;
+    let room_id = Uuid::parse_str(&request.room_id)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid room id"))?;
+    if !matches!(
+        request.disclosure_scope.as_str(),
+        "internal" | "shared" | "private" | "dm"
+    ) {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid disclosure scope",
+        ));
+    }
+    let owner_hex = validate_pubkey_hex(&request.owner_pubkey)
+        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid owner pubkey"))?;
+    let owner = hex::decode(&owner_hex)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid owner pubkey"))?;
+    let members = request
+        .member_pubkeys
+        .iter()
+        .map(|pubkey| {
+            validate_pubkey_hex(pubkey)
+                .and_then(|value| hex::decode(value).ok())
+                .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid member pubkey"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let created = state
+        .db
+        .provision_bluplai_managed_room(
+            community_id,
+            room_id,
+            &request.name,
+            &request.disclosure_scope,
+            &owner,
+            &members,
+        )
+        .await
+        .map_err(|_| internal_error("Bluplai room provisioning failed"))?;
+    Ok(Json(serde_json::json!({
+        "community_id": request.community_id,
+        "room_id": room_id,
+        "status": if created { "created" } else { "existed" },
+        "visibility": "private",
+        "channel_type": if request.disclosure_scope == "dm" { "dm" } else { "stream" },
+    })))
+}
+
+/// Apply one idempotent Bluplai desired-membership projection.
+pub async fn project_bluplai_membership(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    const PATH: &str = "/operator/bluplai/memberships";
+    let operator =
+        authorize_operator_request(&state, &headers, "POST", PATH, None, Some(&body)).await?;
+    let request: ProjectBluplaiMembershipRequest = serde_json::from_slice(&body)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid membership request"))?;
+    let community_id = Uuid::parse_str(&request.community_id)
+        .map(CommunityId::from_uuid)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid community id"))?;
+    let room_id = Uuid::parse_str(&request.room_id)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid room id"))?;
+    let member_hex = validate_pubkey_hex(&request.member_pubkey)
+        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid member pubkey"))?;
+    let member = hex::decode(&member_hex)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid member pubkey"))?;
+    if !matches!(request.operation.as_str(), "upsert" | "remove") {
+        return Err(api_error(StatusCode::BAD_REQUEST, "invalid operation"));
+    }
+    // Bluplai administrators remain ordinary Buzz members. Raw Buzz
+    // administrative power stays with the isolated operator control plane.
+    let role = if request.role.as_deref() == Some("guest") {
+        buzz_db::channel::MemberRole::Guest
+    } else {
+        buzz_db::channel::MemberRole::Member
+    };
+    state
+        .db
+        .project_bluplai_member(
+            community_id,
+            room_id,
+            &member,
+            &request.operation,
+            role,
+            operator.as_bytes(),
+        )
+        .await
+        .map_err(|_| internal_error("Bluplai membership projection failed"))?;
+    Ok(Json(serde_json::json!({
+        "community_id": request.community_id,
+        "room_id": request.room_id,
+        "member_pubkey": request.member_pubkey,
+        "status": "applied",
+    })))
+}
+
+/// Claim committed visible events for Bluplai's exactly-once journal consumer.
+pub async fn claim_bluplai_visible_events(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    RawQuery(raw_query): RawQuery,
+    Query(query): Query<BluplaiVisibleEventsQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    const PATH: &str = "/operator/bluplai/visible-events";
+    authorize_operator_request(&state, &headers, "GET", PATH, raw_query.as_deref(), None).await?;
+    let community_id = Uuid::parse_str(&query.community_id)
+        .map(CommunityId::from_uuid)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid community id"))?;
+    let rows = state
+        .db
+        .claim_bluplai_visible_events(community_id, query.limit.unwrap_or(100))
+        .await
+        .map_err(|_| internal_error("visible event claim failed"))?;
+    Ok(Json(serde_json::json!({
+        "community_id": query.community_id,
+        "events": rows.into_iter().map(|row| serde_json::json!({
+            "outbox_id": row.id,
+            "room_id": row.channel_id,
+            "event_id": hex::encode(row.event_id),
+            "event_created_at": row.event_created_at,
+            "event_kind": row.event_kind,
+            "author_pubkey": hex::encode(row.author_pubkey),
+            "notification_class": row.notification_class,
+            "source_class": row.source_class,
+            "payload": row.payload,
+        })).collect::<Vec<_>>()
+    })))
+}
+
+/// Complete one visible event only after Bluplai durably journaled it.
+pub async fn complete_bluplai_visible_event(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    const PATH: &str = "/operator/bluplai/visible-events/complete";
+    authorize_operator_request(&state, &headers, "POST", PATH, None, Some(&body)).await?;
+    let request: CompleteBluplaiVisibleEventRequest = serde_json::from_slice(&body)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid completion request"))?;
+    let community_id = Uuid::parse_str(&request.community_id)
+        .map(CommunityId::from_uuid)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid community id"))?;
+    let outbox_id = Uuid::parse_str(&request.outbox_id)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid outbox id"))?;
+    state
+        .db
+        .complete_bluplai_visible_event(community_id, outbox_id)
+        .await
+        .map_err(|_| internal_error("visible event completion failed"))?;
+    Ok(Json(serde_json::json!({"status": "completed"})))
 }
 
 /// Create a community host and atomically bootstrap its initial owner.

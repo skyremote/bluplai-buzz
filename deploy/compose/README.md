@@ -3,6 +3,12 @@
 This is the single-node/VPS deployment bundle. It is intentionally separate from
 the root `docker-compose.yml`, which remains local development infrastructure.
 
+The base bundle keeps its upstream-friendly local Postgres, Redis and MinIO
+defaults. The Bluplai production topology is a separate standalone bundle at
+[`../bluplai/compose.yml`](../bluplai/compose.yml); it requires external durable
+dependencies, an immutable relay image digest, explicit migrations and strict
+TLS/browser-origin ingress. Do not merge the two bundles for production.
+
 ## Quick start
 
 ```bash
@@ -40,9 +46,11 @@ keypair.
   those are real Buzz dependencies today. Minimal mode can simplify this later.
 - The bundled Compose stack fixes the relay endpoint to `http://minio:9000` and
   `BUZZ_S3_ADDRESSING_STYLE=path`: Docker DNS resolves `minio`, not
-  `<bucket>.minio`. It is not configurable for an external S3 provider through
-  `.env`; use the Helm chart or a custom Compose configuration for providers
-  such as new Railway Storage Buckets that require `virtual` addressing.
+  `<bucket>.minio` by default.
+- `DATABASE_URL`, `REDIS_URL`, `BUZZ_S3_ENDPOINT`,
+  `BUZZ_S3_ADDRESSING_STYLE`, and `CADDY_IMAGE` can be overridden while their
+  existing local defaults remain unchanged. These are narrow overlay seams;
+  the stricter standalone Bluplai topology remains in `../bluplai/compose.yml`.
 
 Run `./run.sh backup-hint` for the backup checklist.
 

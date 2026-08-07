@@ -561,7 +561,7 @@ mod tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 26);
+        assert_eq!(migrations.len(), 28);
         assert_eq!(migrations[0].version, 1);
         assert_eq!(&*migrations[0].description, "initial schema");
         assert!(migrations[0]
@@ -905,6 +905,14 @@ mod tests {
             desired_schema.contains("CREATE TABLE join_policy_acceptances"),
             "desired-state schema must include join-policy evidence used by invite claims",
         );
+        assert!(
+            desired_schema.contains("CREATE TABLE bluplai_visible_event_outbox"),
+            "desired-state schema must include the Bluplai visible-event outbox used by fresh and CI databases",
+        );
+        assert!(
+            desired_schema.contains("CREATE TABLE bluplai_historical_imports"),
+            "desired-state schema must include the Bluplai historical-import ledger used by fresh and CI databases",
+        );
 
         // Replica heartbeat (this branch, renumbered to 0026 after
         // 0025_relay_invites landed on main): the fence's portable read-side
@@ -919,6 +927,19 @@ mod tests {
         assert!(heartbeat.contains("epoch"));
         assert!(heartbeat.contains("INSERT INTO replica_heartbeat (id) VALUES (1)"));
         assert!(heartbeat.contains("_operator_global_tables"));
+
+        // Bluplai integration migrations remain additive and tenant-scoped.
+        // They must never be folded into 0001 because that would change the
+        // checksum for every existing Buzz deployment.
+        assert_eq!(migrations[26].version, 27);
+        let visible_outbox = migrations[26].sql.as_str();
+        assert!(visible_outbox.contains("CREATE TABLE bluplai_visible_event_outbox"));
+        assert!(visible_outbox.contains("PRIMARY KEY (community_id, id)"));
+        assert_eq!(migrations[27].version, 28);
+        assert!(migrations[27]
+            .sql
+            .as_str()
+            .contains("CREATE TABLE bluplai_historical_imports"));
     }
 
     #[test]

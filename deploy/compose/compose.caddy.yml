@@ -3,7 +3,7 @@ services:
     ports: !reset []
 
   caddy:
-    image: caddy:2-alpine
+    image: ${CADDY_IMAGE:-caddy:2-alpine}
     depends_on:
       relay:
         condition: service_healthy

@@ -1,0 +1,101 @@
+name: bluplai-buzz
+
+services:
+  preflight:
+    image: ${BUZZ_IMAGE:?set BUZZ_IMAGE to an immutable @sha256 digest}
+    env_file:
+      - ${BLUPLAI_ENV_FILE:-env.production}
+    entrypoint: ["/usr/local/bin/buzz-admin"]
+    command: ["validate-bluplai-deployment"]
+    restart: "no"
+    networks:
+      - service-egress
+
+  migrate:
+    image: ${BUZZ_IMAGE:?set BUZZ_IMAGE to an immutable @sha256 digest}
+    profiles: ["migrate"]
+    env_file:
+      - ${BLUPLAI_ENV_FILE:-env.production}
+    entrypoint: ["/usr/local/bin/buzz-admin"]
+    command: ["migrate"]
+    restart: "no"
+    networks:
+      - service-egress
+
+  relay:
+    image: ${BUZZ_IMAGE:?set BUZZ_IMAGE to an immutable @sha256 digest}
+    env_file:
+      - ${BLUPLAI_ENV_FILE:-env.production}
+    environment:
+      BUZZ_BIND_ADDR: 0.0.0.0:3000
+      BUZZ_HEALTH_PORT: "8080"
+      BUZZ_METRICS_PORT: "9102"
+      BUZZ_REQUIRE_AUTH_TOKEN: "true"
+      BUZZ_REQUIRE_RELAY_MEMBERSHIP: "true"
+      BUZZ_AUTO_MIGRATE: "false"
+      BUZZ_CORS_ORIGINS: ${BLUPLAI_BROWSER_ORIGIN:?set one exact HTTPS origin}
+    expose:
+      - "3000"
+      - "8080"
+      - "9102"
+    volumes:
+      - buzz-git-data:/data/git
+    depends_on:
+      preflight:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "bash -ec 'exec 3<>/dev/tcp/127.0.0.1/8080; printf \"GET /_readiness HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n\" >&3; grep -q \"200 OK\" <&3'",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - ingress-private
+      - service-egress
+
+  caddy:
+    image: ${CADDY_IMAGE:?set CADDY_IMAGE to an immutable @sha256 digest}
+    env_file:
+      - ${BLUPLAI_ENV_FILE:-env.production}
+    depends_on:
+      relay:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${BLUPLAI_TLS_CERT_DIR:?mount the certificate directory}:/etc/caddy/tls:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-check-certificate --header=Host:$${BLUPLAI_RELAY_CONTROL_HOST} -q --spider https://127.0.0.1/_liveness",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - ingress-private
+
+volumes:
+  buzz-git-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  ingress-private:
+    driver: bridge
+    internal: true
+  service-egress:
+    driver: bridge
+    internal: false

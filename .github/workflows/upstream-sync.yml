@@ -1,0 +1,131 @@
+name: Reviewed upstream sync
+
+on:
+  schedule:
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: bluplai-upstream-sync
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  propose-sync:
+    name: Propose reviewed upstream merge
+    if: github.repository == 'skyremote/bluplai-buzz'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout fork main
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          ref: main
+      - name: Activate pinned toolchain
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      - name: Prepare merge and delta report
+        id: prepare
+        env:
+          UPSTREAM_URL: https://github.com/block/buzz.git
+        run: |
+          set -euo pipefail
+          git config user.name "bluplai-upstream-sync[bot]"
+          git config user.email "bluplai-upstream-sync[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags upstream main
+
+          current_base="$(tr -d '[:space:]' < UPSTREAM_BASE)"
+          upstream_head="$(git rev-parse upstream/main)"
+          git cat-file -e "${current_base}^{commit}"
+
+          if [ "$current_base" = "$upstream_head" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "UPSTREAM_BASE already matches upstream/main at $upstream_head." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          branch="sync/upstream-${upstream_head:0:12}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "A review branch already exists: $branch" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git switch -c "$branch"
+          git merge --no-ff --no-commit upstream/main
+          printf '%s\n' "$upstream_head" > UPSTREAM_BASE
+
+          report="$RUNNER_TEMP/upstream-delta.md"
+          {
+            echo "## Upstream delta"
+            echo
+            echo "- Previous audited base: \`$current_base\`"
+            echo "- Proposed upstream base: \`$upstream_head\`"
+            echo "- Fork head before merge: \`$GITHUB_SHA\`"
+            echo
+            echo "### Incoming upstream commits"
+            echo
+            git log --format='- `%h` %s' "$current_base..$upstream_head"
+            echo
+            echo "### Bluplai delta after merge"
+            echo
+            echo '```text'
+            git diff --stat "$upstream_head" -- . \
+              ':(exclude)UPSTREAM_BASE'
+            echo '```'
+            echo
+            echo "This draft never deploys. Merge requires human review plus the"
+            echo "upstream and Bluplai compatibility gates in this workflow."
+          } > "$report"
+
+          git add UPSTREAM_BASE
+          git commit -s -m "chore: sync upstream ${upstream_head:0:12}"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "upstream_head=$upstream_head" >> "$GITHUB_OUTPUT"
+      - name: Install JavaScript workspace
+        if: steps.prepare.outputs.changed == 'true'
+        run: pnpm install --frozen-lockfile
+      - name: Run Bluplai compatibility gates
+        if: steps.prepare.outputs.changed == 'true'
+        run: |
+          pnpm --filter @bluplai/buzz-chat-react check
+          pnpm --filter @bluplai/buzz-chat-react test
+          pnpm --filter @bluplai/buzz-chat-react build
+      - name: Run upstream checks
+        if: steps.prepare.outputs.changed == 'true'
+        run: |
+          just check
+          just test-unit
+      - name: Upload delta report
+        if: always() && steps.prepare.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: upstream-delta-${{ steps.prepare.outputs.upstream_head }}
+          path: ${{ runner.temp }}/upstream-delta.md
+          if-no-files-found: error
+          retention-days: 30
+      - name: Push reviewed-sync branch
+        if: steps.prepare.outputs.changed == 'true'
+        env:
+          BRANCH: ${{ steps.prepare.outputs.branch }}
+        run: git push --set-upstream origin "HEAD:$BRANCH"
+      - name: Open draft pull request
+        if: steps.prepare.outputs.changed == 'true'
+        env:
+          BRANCH: ${{ steps.prepare.outputs.branch }}
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_HEAD: ${{ steps.prepare.outputs.upstream_head }}
+        run: |
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --draft \
+            --title "chore: review upstream ${UPSTREAM_HEAD:0:12}" \
+            --body-file "$RUNNER_TEMP/upstream-delta.md"

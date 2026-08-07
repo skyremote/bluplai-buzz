@@ -1,0 +1,25 @@
+https://{$BLUPLAI_RELAY_CONTROL_HOST}, https://*.{$BLUPLAI_COMMUNITY_BASE_DOMAIN} {
+  tls /etc/caddy/tls/tls.crt /etc/caddy/tls/tls.key
+  encode zstd gzip
+
+  @invalid_websocket {
+    header Connection *Upgrade*
+    header Upgrade websocket
+    not header Origin {$BLUPLAI_BROWSER_ORIGIN}
+  }
+  respond @invalid_websocket "websocket origin forbidden" 403
+
+  reverse_proxy relay:3000 {
+    # Discard client-supplied proxy identity, then set one trusted canonical hop.
+    header_up -Forwarded
+    header_up -X-Forwarded-Host
+    header_up -X-Forwarded-Proto
+    header_up Host {http.request.host}
+    header_up X-Forwarded-Host {http.request.host}
+    header_up X-Forwarded-Proto https
+  }
+}
+
+http://{$BLUPLAI_RELAY_CONTROL_HOST}, http://*.{$BLUPLAI_COMMUNITY_BASE_DOMAIN} {
+  redir https://{http.request.host}{http.request.uri} permanent
+}

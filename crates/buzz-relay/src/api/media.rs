@@ -61,6 +61,7 @@ fn upload_route_mode(path: &str) -> Result<UploadRouteMode, MediaError> {
 
 struct MediaReadAuth {
     tenant: TenantContext,
+    protected: bool,
 }
 
 const MEDIA_UPLOAD_RATE_WINDOW: Duration = Duration::from_secs(60);
@@ -283,6 +284,28 @@ async fn upload_attribution(
     })
 }
 
+fn requested_bluplai_room(
+    auth_event: &nostr::Event,
+    headers: &HeaderMap,
+) -> Result<Option<uuid::Uuid>, MediaError> {
+    let header_room = headers
+        .get("x-bluplai-room-id")
+        .and_then(|value| value.to_str().ok());
+    let tagged_room = auth_event.tags.iter().find_map(|tag| {
+        let values = tag.as_slice();
+        (values.first().map(String::as_str) == Some("bluplai-room"))
+            .then(|| values.get(1).map(String::as_str))
+            .flatten()
+    });
+    match (header_room, tagged_room) {
+        (None, None) => Ok(None),
+        (Some(header), Some(tagged)) if header == tagged => uuid::Uuid::parse_str(header)
+            .map(Some)
+            .map_err(|_| MediaError::Unauthorized),
+        _ => Err(MediaError::Unauthorized),
+    }
+}
+
 /// PUT `/upload` or the temporary media-only `/media/upload` alias.
 ///
 /// Auth is validated via the [`AuthenticatedUpload`] extractor BEFORE the body
@@ -309,6 +332,54 @@ pub async fn upload_blob(
     body: axum::body::Body,
 ) -> Result<Json<BlobDescriptor>, MediaError> {
     let attribution = upload_attribution(&state, &auth, &headers).await;
+    let bluplai_room = requested_bluplai_room(&auth.auth_event, &headers)?;
+    let mut bluplai_hash = None;
+    if let Some(room_id) = bluplai_room {
+        let current_member = state
+            .db
+            .is_member(
+                auth.tenant.community(),
+                room_id,
+                auth.auth_event.pubkey.as_bytes(),
+            )
+            .await
+            .map_err(|_| MediaError::Unauthorized)?;
+        if !current_member {
+            return Err(MediaError::Unauthorized);
+        }
+        // Establish the private ACL before any object/sidecar write. If the
+        // storage pipeline fails, the claimed URL remains protected and 404;
+        // it can never fall back to ordinary public Blossom semantics.
+        let claimed_hash = headers
+            .get("x-sha-256")
+            .and_then(|value| value.to_str().ok())
+            .ok_or(MediaError::HashMismatch)?;
+        let hash = hex::decode(claimed_hash).map_err(|_| MediaError::HashMismatch)?;
+        let claimed_size = headers
+            .get("content-length")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<i64>().ok())
+            .unwrap_or(0);
+        let claimed_type = headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok());
+        let bound = state
+            .db
+            .bind_bluplai_room_media(
+                auth.tenant.community(),
+                &hash,
+                room_id,
+                auth.auth_event.pubkey.as_bytes(),
+                claimed_size,
+                claimed_type,
+            )
+            .await
+            .map_err(|_| MediaError::Internal)?;
+        if !bound {
+            return Err(MediaError::Unauthorized);
+        }
+        bluplai_hash = Some(hash);
+    }
 
     if auth.route_mode == UploadRouteMode::LegacyMedia {
         metrics::counter!("buzz_media_legacy_upload_route_total").increment(1);
@@ -398,6 +469,29 @@ pub async fn upload_blob(
             .await?
         }
     };
+
+    if let (Some(room_id), Some(prebound_hash)) = (bluplai_room, bluplai_hash.as_deref()) {
+        let hash = hex::decode(&descriptor.sha256).map_err(|_| MediaError::Internal)?;
+        if hash != prebound_hash {
+            return Err(MediaError::HashMismatch);
+        }
+        let byte_size = i64::try_from(descriptor.size).map_err(|_| MediaError::Internal)?;
+        let finalized = state
+            .db
+            .bind_bluplai_room_media(
+                auth.tenant.community(),
+                &hash,
+                room_id,
+                auth.auth_event.pubkey.as_bytes(),
+                byte_size,
+                Some(&descriptor.mime_type),
+            )
+            .await
+            .map_err(|_| MediaError::Internal)?;
+        if !finalized {
+            return Err(MediaError::Unauthorized);
+        }
+    }
 
     rewrite_descriptor_urls_for_tenant(
         &mut descriptor,
@@ -493,12 +587,23 @@ async fn authenticate_media_read(
 ) -> Result<MediaReadAuth, MediaError> {
     let tenant = bind_media_read_tenant(state, headers).await?;
 
-    if !state.config.require_media_get_auth {
-        return Ok(MediaReadAuth { tenant });
+    let sha256 = sha256_ext.split('.').next().unwrap_or(sha256_ext);
+    let sha256_bytes = hex::decode(sha256).map_err(|_| MediaError::NotFound)?;
+    let protected = state
+        .db
+        .bluplai_protected_media_room(tenant.community(), &sha256_bytes)
+        .await
+        .map_err(|_| MediaError::NotFound)?
+        .is_some();
+
+    if !state.config.require_media_get_auth && !protected {
+        return Ok(MediaReadAuth {
+            tenant,
+            protected: false,
+        });
     }
 
     let auth_event = extract_blossom_auth(headers)?;
-    let sha256 = sha256_ext.split('.').next().unwrap_or(sha256_ext);
     buzz_media::auth::verify_blossom_get_auth(&auth_event, sha256, Some(tenant.host()), 3600)?;
 
     let auth_tag = headers.get("x-auth-tag").and_then(|v| v.to_str().ok());
@@ -511,7 +616,22 @@ async fn authenticate_media_read(
     .await
     .map_err(|_| MediaError::RelayMembershipRequired)?;
 
-    Ok(MediaReadAuth { tenant })
+    if protected
+        && !state
+            .db
+            .can_read_bluplai_protected_media(
+                tenant.community(),
+                &sha256_bytes,
+                auth_event.pubkey.as_bytes(),
+            )
+            .await
+            .map_err(|_| MediaError::NotFound)?
+    {
+        // Do not disclose whether the hash exists or which room owns it.
+        return Err(MediaError::NotFound);
+    }
+
+    Ok(MediaReadAuth { tenant, protected })
 }
 
 fn blob_cache_control(require_auth: bool) -> &'static str {
@@ -608,7 +728,14 @@ pub async fn get_blob(
 ) -> Result<Response, MediaError> {
     validate_media_path(&sha256_ext)?;
     let media_auth = authenticate_media_read(&state, &req_headers, &sha256_ext).await?;
-    serve_blob_for_tenant(&state, &media_auth.tenant, &sha256_ext, &req_headers).await
+    serve_blob_for_tenant(
+        &state,
+        &media_auth.tenant,
+        &sha256_ext,
+        &req_headers,
+        media_auth.protected,
+    )
+    .await
 }
 
 /// Serve a validated blob from an already-authorized tenant context.
@@ -621,9 +748,10 @@ pub(crate) async fn serve_blob_for_tenant(
     tenant: &TenantContext,
     sha256_ext: &str,
     req_headers: &HeaderMap,
+    force_private: bool,
 ) -> Result<Response, MediaError> {
     validate_media_path(sha256_ext)?;
-    let cache_control = blob_cache_control(state.config.require_media_get_auth);
+    let cache_control = blob_cache_control(state.config.require_media_get_auth || force_private);
 
     // Sidecar gate FIRST — reject before any blob I/O. Storage is not authoritative.
     let content_type = if sha256_ext.ends_with(".thumb.jpg") {
@@ -801,10 +929,9 @@ pub async fn head_blob(
     Path(sha256_ext): Path<String>,
 ) -> Result<Response, MediaError> {
     validate_media_path(&sha256_ext)?;
-    let require_media_get_auth = state.config.require_media_get_auth;
     let media_auth = authenticate_media_read(&state, &headers, &sha256_ext).await?;
-    let tenant = media_auth.tenant;
-    let cache_control = blob_cache_control(require_media_get_auth);
+    let MediaReadAuth { tenant, protected } = media_auth;
+    let cache_control = blob_cache_control(state.config.require_media_get_auth || protected);
 
     // Sidecar gate FIRST — reject before any blob I/O.
     let content_type = if sha256_ext.ends_with(".thumb.jpg") {
