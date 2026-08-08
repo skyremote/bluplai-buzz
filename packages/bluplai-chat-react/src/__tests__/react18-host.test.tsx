@@ -224,6 +224,22 @@ describe("React 18 host compatibility", () => {
     expect(disconnect).toHaveBeenCalledOnce();
   });
 
+  it("renders a retained workspace on the first remount frame", () => {
+    const { transport } = createTransport();
+    const retainedTransport = transport as BuzzChatTransport & {
+      getSnapshot: () => ChatWorkspaceSnapshot;
+    };
+    retainedTransport.getSnapshot = () => workspace;
+    retainedTransport.loadWorkspace = vi.fn(
+      () => new Promise<ChatWorkspaceSnapshot>(() => undefined),
+    );
+
+    render(<BluplaiChat transport={retainedTransport} />);
+
+    expect(screen.getByRole("heading", { name: "General" })).toBeTruthy();
+    expect(screen.queryByText("Loading Bluplai Chat…")).toBeNull();
+  });
+
   it("renders rooms, threads, reactions, and read state from the transport", async () => {
     const { transport } = createTransport();
     render(<BluplaiChat transport={transport} />);
@@ -251,6 +267,40 @@ describe("React 18 host compatibility", () => {
     ).toBeTruthy();
     expect(within(thread).getByLabelText("Unread message")).toBeTruthy();
     expect(within(thread).getByText("Replying in thread")).toBeTruthy();
+  });
+
+  it.each([
+    "sending",
+    "sent",
+  ] as const)("withholds thread and reaction actions while an optimistic message is %s", async (deliveryState) => {
+    const rootMessage = workspace.messages.find(
+      (message) => message.id === "message-root",
+    );
+    if (!rootMessage) throw new Error("root fixture is unavailable");
+    const pendingWorkspace: ChatWorkspaceSnapshot = {
+      ...workspace,
+      messages: [
+        {
+          ...rootMessage,
+          id: "local:pending",
+          deliveryState,
+        },
+      ],
+    };
+    const { transport } = createTransport(pendingWorkspace);
+    render(<BluplaiChat transport={transport} />);
+
+    const message = await screen.findByRole("article", {
+      name: "Message from Leandro",
+    });
+    expect(
+      within(message).queryByRole("button", { name: "Reply in thread" }),
+    ).toBeNull();
+    expect(
+      within(message).queryByRole("button", {
+        name: "Add thumbs up reaction",
+      }),
+    ).toBeNull();
   });
 
   it("shows when a direct reply will ask Bluplai", async () => {
