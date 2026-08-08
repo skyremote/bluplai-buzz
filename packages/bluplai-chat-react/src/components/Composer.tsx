@@ -7,7 +7,12 @@ import {
   useId,
   type KeyboardEvent,
 } from "react";
-import type { ChatAttachment, ChatGif, ChatMember } from "../transport/types";
+import type {
+  ChatAttachment,
+  ChatGif,
+  ChatMember,
+  ChatProjectReference,
+} from "../transport/types";
 import { ChatIcon } from "./ChatIcon";
 
 export interface ComposerSubmit {
@@ -15,12 +20,14 @@ export interface ComposerSubmit {
   attachments: ChatAttachment[];
   gifs: ChatGif[];
   mentionedUserIds: string[];
+  mentionedProjectIds: string[];
 }
 
 export interface ComposerProps {
   roomId: string;
   roomName: string;
   members: ChatMember[];
+  projects?: ChatProjectReference[];
   draftId?: string;
   disabled?: boolean;
   compact?: boolean;
@@ -60,9 +67,14 @@ type AttachmentItem = {
 type MentionToken = {
   id: string;
   displayName: string;
+  kind: "member" | "project";
   start: number;
   end: number;
 };
+
+type MentionOption =
+  | (ChatMember & { kind: "member" })
+  | (ChatProjectReference & { kind: "project" });
 
 type LanguageOption = {
   code: string;
@@ -271,14 +283,22 @@ function storedMentionTokens(key: string, body: string): MentionToken[] {
   try {
     const value = JSON.parse(window.localStorage.getItem(key) ?? "[]");
     if (!Array.isArray(value)) return [];
-    return value.filter(
-      (token): token is MentionToken =>
-        typeof token?.id === "string" &&
-        typeof token?.displayName === "string" &&
-        Number.isInteger(token?.start) &&
-        Number.isInteger(token?.end) &&
-        body.slice(token.start, token.end) === `@${token.displayName}`,
-    );
+    return value.flatMap((token): MentionToken[] => {
+      if (
+        typeof token?.id !== "string" ||
+        typeof token?.displayName !== "string" ||
+        Number.isInteger(token?.start) === false ||
+        Number.isInteger(token?.end) === false ||
+        body.slice(token.start, token.end) !== `@${token.displayName}`
+      )
+        return [];
+      return [
+        {
+          ...token,
+          kind: token.kind === "project" ? "project" : "member",
+        },
+      ];
+    });
   } catch {
     return [];
   }
@@ -361,6 +381,7 @@ export function Composer({
   roomId,
   roomName,
   members,
+  projects = [],
   draftId,
   disabled,
   compact,
@@ -521,21 +542,47 @@ export function Composer({
   const mentionOptions = useMemo(() => {
     const query =
       trigger?.panel === "mention" ? trigger.query.toLocaleLowerCase() : "";
-    return members
+    const options: MentionOption[] = [
+      ...members.map((member) => ({ ...member, kind: "member" as const })),
+      ...projects.map((project) => ({ ...project, kind: "project" as const })),
+    ];
+    return options
       .filter(
-        (member) =>
-          !query || member.displayName.toLocaleLowerCase().includes(query),
+        (option) =>
+          !query || option.displayName.toLocaleLowerCase().includes(query),
       )
       .sort((left, right) => {
-        if (left.role === "agent" && right.role !== "agent") return -1;
-        if (right.role === "agent" && left.role !== "agent") return 1;
-        if (left.presence === "online" && right.presence !== "online")
+        if (
+          left.kind === "member" &&
+          left.role === "agent" &&
+          !(right.kind === "member" && right.role === "agent")
+        )
           return -1;
-        if (right.presence === "online" && left.presence !== "online") return 1;
+        if (
+          right.kind === "member" &&
+          right.role === "agent" &&
+          !(left.kind === "member" && left.role === "agent")
+        )
+          return 1;
+        if (left.kind !== right.kind) return left.kind === "project" ? 1 : -1;
+        if (
+          left.kind === "member" &&
+          right.kind === "member" &&
+          left.presence === "online" &&
+          right.presence !== "online"
+        )
+          return -1;
+        if (
+          left.kind === "member" &&
+          right.kind === "member" &&
+          right.presence === "online" &&
+          left.presence !== "online"
+        )
+          return 1;
         return left.displayName.localeCompare(right.displayName);
       })
-      .slice(0, 8);
-  }, [members, trigger]);
+      .slice(0, 12);
+  }, [members, projects, trigger]);
 
   const commandOptions = useMemo(() => {
     const query =
@@ -573,7 +620,7 @@ export function Composer({
       start: number,
       end: number,
       value: string,
-      mention?: Pick<MentionToken, "id" | "displayName">,
+      mention?: Pick<MentionToken, "id" | "displayName" | "kind">,
     ) => {
       const nextBody = `${body.slice(0, start)}${value}${body.slice(end)}`;
       setMentionTokens((current) => {
@@ -606,15 +653,15 @@ export function Composer({
     replaceRange(start, end, value);
   };
 
-  const selectMention = (member: ChatMember) => {
-    const value = `@${member.displayName} `;
+  const selectMention = (option: MentionOption) => {
+    const value = `@${option.displayName} `;
     if (trigger?.panel === "mention")
-      replaceRange(trigger.start, trigger.end, value, member);
+      replaceRange(trigger.start, trigger.end, value, option);
     else {
       const textarea = textareaRef.current;
       const start = textarea?.selectionStart ?? body.length;
       const end = textarea?.selectionEnd ?? start;
-      replaceRange(start, end, value, member);
+      replaceRange(start, end, value, option);
     }
     setPanel(null);
     setTrigger(null);
@@ -630,6 +677,7 @@ export function Composer({
       {
         id: agent.id,
         displayName: agent.displayName,
+        kind: "member",
         start: 0,
         end: mention.length,
       },
@@ -652,7 +700,8 @@ export function Composer({
 
   const runCommand = (action: CommandAction) => {
     if (trigger?.panel === "commands") clearTypedTrigger();
-    if (action === "ask-ai" && agent) selectMention(agent);
+    if (action === "ask-ai" && agent)
+      selectMention({ ...agent, kind: "member" });
     else if (action === "summarise")
       applyAgentPrompt(
         "Summarise this conversation. Call out decisions, risks and next actions.",
@@ -799,13 +848,21 @@ export function Composer({
     setSubmitting(true);
     setError(null);
     try {
+      const retainedMentions = mentionTokens.filter(
+        (token) =>
+          body.slice(token.start, token.end) === `@${token.displayName}`,
+      );
       const retainedMentionIds = Array.from(
         new Set(
-          mentionTokens
-            .filter(
-              (token) =>
-                body.slice(token.start, token.end) === `@${token.displayName}`,
-            )
+          retainedMentions
+            .filter((token) => token.kind === "member")
+            .map((token) => token.id),
+        ),
+      );
+      const retainedProjectIds = Array.from(
+        new Set(
+          retainedMentions
+            .filter((token) => token.kind === "project")
             .map((token) => token.id),
         ),
       );
@@ -814,6 +871,7 @@ export function Composer({
         attachments: readyAttachments,
         gifs,
         mentionedUserIds: retainedMentionIds,
+        mentionedProjectIds: retainedProjectIds,
       });
       setBody("");
       safeStorageSet(draftKey, "");
@@ -855,7 +913,7 @@ export function Composer({
     if ((event.key === "Enter" || event.key === "Tab") && options.length) {
       event.preventDefault();
       if (panel === "mention")
-        selectMention(mentionOptions[selectedIndex] as ChatMember);
+        selectMention(mentionOptions[selectedIndex] as MentionOption);
       else if (panel === "commands")
         runCommand(commandOptions[selectedIndex]?.action as CommandAction);
       else selectEmoji(emojiOptions[selectedIndex]?.[1] ?? "");
@@ -922,7 +980,10 @@ export function Composer({
     `${suggestionId}-${kind}-${String(value).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   const activeSuggestionId =
     panel === "mention" && mentionOptions[selectedIndex]
-      ? optionId("mention", mentionOptions[selectedIndex].id)
+      ? optionId(
+          "mention",
+          `${mentionOptions[selectedIndex].kind}-${mentionOptions[selectedIndex].id}`,
+        )
       : panel === "commands" && commandOptions[selectedIndex]
         ? optionId("command", commandOptions[selectedIndex].action)
         : panel === "emoji" && trigger && emojiOptions[selectedIndex]
@@ -940,37 +1001,44 @@ export function Composer({
           role="listbox"
         >
           <header>
-            <strong>People and AI</strong>
+            <strong>People, AI and projects</strong>
             <span>Enter to mention</span>
           </header>
           {mentionOptions.length ? (
-            mentionOptions.map((member, index) => (
+            mentionOptions.map((option, index) => (
               <button
                 aria-selected={index === selectedIndex}
                 className={index === selectedIndex ? "is-selected" : ""}
-                id={optionId("mention", member.id)}
-                key={member.id}
-                onClick={() => selectMention(member)}
+                aria-label={`${option.displayName} · ${option.kind === "project" ? "Project" : option.role}`}
+                id={optionId("mention", `${option.kind}-${option.id}`)}
+                key={`${option.kind}-${option.id}`}
+                onClick={() => selectMention(option)}
                 onMouseDown={(event) => event.preventDefault()}
                 role="option"
                 type="button"
               >
                 <span className="bluplai-chat__suggestion-avatar">
-                  {member.role === "agent" ? (
+                  {option.kind === "project" ? (
+                    <ChatIcon name="hash" />
+                  ) : option.role === "agent" ? (
                     <ChatIcon name="sparkles" />
                   ) : (
-                    member.displayName.slice(0, 1).toUpperCase()
+                    option.displayName.slice(0, 1).toUpperCase()
                   )}
                 </span>
                 <span>
-                  <strong>{member.displayName}</strong>
+                  <strong>{option.displayName}</strong>
                   <small>
-                    {member.role === "agent"
-                      ? "AI agent · uses this room's context"
-                      : member.role}
+                    {option.kind === "project"
+                      ? `Project${option.accountName ? ` · ${option.accountName}` : ""}`
+                      : option.role === "agent"
+                        ? "AI agent · uses this room's context"
+                        : option.role}
                   </small>
                 </span>
-                <i data-presence={member.presence} />
+                {option.kind === "member" ? (
+                  <i data-presence={option.presence} />
+                ) : null}
               </button>
             ))
           ) : (

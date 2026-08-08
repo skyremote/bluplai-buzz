@@ -53,6 +53,14 @@ export interface ChatMember extends ChatAuthor {
   role: "owner" | "admin" | "member" | "guest" | "agent";
 }
 
+/** A project that can be referenced as structured AI context in chat. */
+export interface ChatProjectReference {
+  id: string;
+  displayName: string;
+  accountId: string;
+  accountName?: string | null;
+}
+
 export interface ChatTypingIndicator {
   roomId: string;
   userId: string;
@@ -139,6 +147,7 @@ export type AllowedChatCommand =
       roomId: string;
       body: string;
       mentionedUserIds?: string[];
+      mentionedProjectIds?: string[];
       threadRootId?: string;
       parentMessageId?: string;
       attachments?: ChatAttachmentReference[];

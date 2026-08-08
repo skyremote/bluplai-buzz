@@ -18,6 +18,7 @@ import type {
   ChatAttachmentReference,
   ChatGif,
   ChatMessage,
+  ChatProjectReference,
   ChatRoom,
   ChatWorkspaceSnapshot,
 } from "./transport/types";
@@ -255,6 +256,22 @@ export function BluplaiChat({
     );
     return { room, messages, roots, repliesByRoot, readState, members };
   }, [selectedRoomId, workspace]);
+  const mentionProjects = useMemo<ChatProjectReference[]>(() => {
+    if (workspace.status !== "ready") return [];
+    const byId = new Map<string, ChatProjectReference>();
+    for (const room of workspace.snapshot.rooms) {
+      if (!room.projectId || !room.projectName || !room.accountId) continue;
+      byId.set(room.projectId, {
+        id: room.projectId,
+        displayName: room.projectName,
+        accountId: room.accountId,
+        accountName: room.accountName,
+      });
+    }
+    return [...byId.values()].sort((left, right) =>
+      left.displayName.localeCompare(right.displayName),
+    );
+  }, [workspace]);
   const threadReplies = useMemo(() => {
     if (!projection || !threadRoot) return [];
     const rootId = threadRoot.threadRootId ?? threadRoot.id;
@@ -408,6 +425,9 @@ export function BluplaiChat({
     const mentions = value.mentionedUserIds.length
       ? { mentionedUserIds: value.mentionedUserIds }
       : {};
+    const projectMentions = value.mentionedProjectIds.length
+      ? { mentionedProjectIds: value.mentionedProjectIds }
+      : {};
     await executeChatCommand(
       transport,
       threadRoot
@@ -416,6 +436,7 @@ export function BluplaiChat({
             roomId: projection.room.id,
             body,
             ...mentions,
+            ...projectMentions,
             attachments,
             parentMessageId: threadAiTarget?.id ?? threadRoot.id,
             threadRootId: threadRoot.threadRootId ?? threadRoot.id,
@@ -425,6 +446,7 @@ export function BluplaiChat({
             roomId: projection.room.id,
             body,
             ...mentions,
+            ...projectMentions,
             attachments,
           },
       capabilities,
@@ -689,9 +711,10 @@ export function BluplaiChat({
                     compact={compact}
                     key={message.id}
                     message={message}
-                    mentionNames={projection.members.map(
-                      (member) => member.displayName,
-                    )}
+                    mentionNames={[
+                      ...projection.members.map((member) => member.displayName),
+                      ...mentionProjects.map((project) => project.displayName),
+                    ]}
                     onOpenThread={
                       !readOnly ||
                       (projection.repliesByRoot.get(message.id)?.length ?? 0) >
@@ -723,6 +746,7 @@ export function BluplaiChat({
                 <Composer
                   compact={compact}
                   members={projection.members}
+                  projects={mentionProjects}
                   roomId={projection.room.id}
                   onSubmit={send}
                   onTypingChange={
@@ -822,9 +846,10 @@ export function BluplaiChat({
               <MessageItem
                 compact
                 message={threadRoot}
-                mentionNames={projection.members.map(
-                  (member) => member.displayName,
-                )}
+                mentionNames={[
+                  ...projection.members.map((member) => member.displayName),
+                  ...mentionProjects.map((project) => project.displayName),
+                ]}
                 readState={projection.readState}
               />
               {threadReplies.map((reply) => (
@@ -832,9 +857,10 @@ export function BluplaiChat({
                   compact
                   key={reply.id}
                   message={reply}
-                  mentionNames={projection.members.map(
-                    (member) => member.displayName,
-                  )}
+                  mentionNames={[
+                    ...projection.members.map((member) => member.displayName),
+                    ...mentionProjects.map((project) => project.displayName),
+                  ]}
                   readState={projection.readState}
                 />
               ))}
@@ -851,6 +877,7 @@ export function BluplaiChat({
                   compact
                   draftId={threadRoot.id}
                   members={projection.members}
+                  projects={mentionProjects}
                   roomId={projection.room.id}
                   onCancelReply={closeThread}
                   onSubmit={send}

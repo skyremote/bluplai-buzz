@@ -498,6 +498,76 @@ describe("React 18 host compatibility", () => {
     );
   });
 
+  it("sends multiple structured project mentions for comparison", async () => {
+    const projectWorkspace: ChatWorkspaceSnapshot = {
+      ...interactiveWorkspace,
+      rooms: [
+        ...interactiveWorkspace.rooms,
+        {
+          id: "room-project-sales",
+          name: "Selling at AI Speed · Internal",
+          unreadCount: 0,
+          projectId: "11111111-1111-4111-8111-111111111111",
+          projectName: "Selling at AI Speed",
+          accountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          accountName: "Autodesk",
+        },
+        {
+          id: "room-project-renewal",
+          name: "Enterprise Renewal · Internal",
+          unreadCount: 0,
+          projectId: "22222222-2222-4222-8222-222222222222",
+          projectName: "Enterprise Renewal",
+          accountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          accountName: "Autodesk",
+        },
+      ],
+    };
+    const { commands, transport } = createTransport(projectWorkspace);
+    render(<BluplaiChat transport={transport} />);
+    const composer = await screen.findByRole("combobox", {
+      name: "Message General",
+    });
+
+    fireEvent.change(composer, {
+      target: { selectionStart: 5, value: "@Sell" },
+    });
+    fireEvent.click(
+      await screen.findByRole("option", {
+        name: /Selling at AI Speed.*project/i,
+      }),
+    );
+    fireEvent.change(composer, {
+      target: {
+        selectionStart: 42,
+        value: "@Selling at AI Speed compare with @Enter",
+      },
+    });
+    fireEvent.click(
+      await screen.findByRole("option", {
+        name: /Enterprise Renewal.*project/i,
+      }),
+    );
+    fireEvent.change(composer, {
+      target: {
+        value:
+          "@Selling at AI Speed compare with @Enterprise Renewal and identify what is missing",
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(
+        commands.find((command) => command.type === "chat.send-message"),
+      ).toMatchObject({
+        mentionedProjectIds: [
+          "11111111-1111-4111-8111-111111111111",
+          "22222222-2222-4222-8222-222222222222",
+        ],
+      }),
+    );
+  });
+
   it("isolates uploads and transient composer state when switching rooms", async () => {
     const { transport } = createTransport(interactiveWorkspace);
     let uploadSignal: AbortSignal | undefined;

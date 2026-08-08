@@ -464,6 +464,8 @@ pub const KIND_HUDDLE_REACTION: u32 = 24810;
 /// `"!shutdown"` and a `#p` tag mentioning the agent. The harness exits gracefully.
 /// This is a convention, not a new event kind — uses regular stream messages.
 pub const KIND_STREAM_MESSAGE: u32 = 9;
+/// NIP-90 compatible progress feedback used for visible Bluplai agent lifecycle state.
+pub const KIND_AGENT_LIFECYCLE: u32 = 7000;
 /// V1 used kind:10002 (replaceable range — wrong).
 pub const KIND_STREAM_MESSAGE_V2: u32 = 40002;
 /// V1 used kind:10004 (replaceable range + NIP-51 collision — wrong).
@@ -686,6 +688,7 @@ pub const ALL_KINDS: &[u32] = &[
     KIND_AGENT_OBSERVER_FRAME,
     KIND_HTTP_AUTH,
     KIND_STREAM_MESSAGE,
+    KIND_AGENT_LIFECYCLE,
     KIND_STREAM_MESSAGE_V2,
     KIND_STREAM_MESSAGE_EDIT,
     KIND_STREAM_MESSAGE_PINNED,

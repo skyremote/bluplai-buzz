@@ -33,6 +33,7 @@ export type {
   ChatGif,
   ChatMessage,
   ChatMember,
+  ChatProjectReference,
   ChatReaction,
   ChatReadState,
   ChatRoom,
