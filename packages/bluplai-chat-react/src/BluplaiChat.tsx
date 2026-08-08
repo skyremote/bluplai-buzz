@@ -860,35 +860,43 @@ export function BluplaiChat({
                   </button>
                 </div>
               </header>
-              <MessageItem
-                compact
-                message={threadRoot}
-                mentionNames={[
-                  ...projection.members.map((member) => member.displayName),
-                  ...mentionProjects.map((project) => project.displayName),
-                ]}
-                readState={projection.readState}
-              />
-              {threadReplies.map((reply) => (
+              <div
+                aria-label="Thread messages"
+                className="bluplai-chat__thread-message-stream"
+                role="log"
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: The independently scrollable thread must be keyboard reachable.
+                tabIndex={0}
+              >
                 <MessageItem
                   compact
-                  key={reply.id}
-                  message={reply}
+                  message={threadRoot}
                   mentionNames={[
                     ...projection.members.map((member) => member.displayName),
                     ...mentionProjects.map((project) => project.displayName),
                   ]}
                   readState={projection.readState}
                 />
-              ))}
-              {threadTyping.length ? (
-                <p className="bluplai-chat__typing" role="status">
-                  {threadTyping
-                    .map((indicator) => indicator.displayName)
-                    .join(", ")}
-                  {threadTyping.length === 1 ? " is" : " are"} typing…
-                </p>
-              ) : null}
+                {threadReplies.map((reply) => (
+                  <MessageItem
+                    compact
+                    key={reply.id}
+                    message={reply}
+                    mentionNames={[
+                      ...projection.members.map((member) => member.displayName),
+                      ...mentionProjects.map((project) => project.displayName),
+                    ]}
+                    readState={projection.readState}
+                  />
+                ))}
+                {threadTyping.length ? (
+                  <p className="bluplai-chat__typing" role="status">
+                    {threadTyping
+                      .map((indicator) => indicator.displayName)
+                      .join(", ")}
+                    {threadTyping.length === 1 ? " is" : " are"} typing…
+                  </p>
+                ) : null}
+              </div>
               {!readOnly ? (
                 <Composer
                   compact

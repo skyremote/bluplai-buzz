@@ -163,12 +163,14 @@
 
 .bluplai-chat__rooms::-webkit-scrollbar,
 .bluplai-chat__message-stream::-webkit-scrollbar,
+.bluplai-chat__thread-message-stream::-webkit-scrollbar,
 .bluplai-chat__search-results::-webkit-scrollbar {
   width: 8px;
 }
 
 .bluplai-chat__rooms::-webkit-scrollbar-thumb,
 .bluplai-chat__message-stream::-webkit-scrollbar-thumb,
+.bluplai-chat__thread-message-stream::-webkit-scrollbar-thumb,
 .bluplai-chat__search-results::-webkit-scrollbar-thumb {
   background: hsl(var(--foreground, 228 22% 9%) / 0.14);
   border: 2px solid transparent;
@@ -1580,7 +1582,18 @@
   color: var(--bluplai-chat-text);
 }
 
-.bluplai-chat__thread-panel > .bluplai-chat__message:nth-of-type(1) {
+.bluplai-chat__thread-message-stream {
+  -webkit-overflow-scrolling: touch;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-color: hsl(var(--foreground, 228 22% 9%) / 0.16) transparent;
+  scrollbar-width: thin;
+  touch-action: pan-y;
+}
+
+.bluplai-chat__thread-message-stream > .bluplai-chat__message:first-of-type {
   border-bottom: 1px solid var(--bluplai-chat-border);
   padding-bottom: 14px;
   padding-top: 14px;
@@ -1591,7 +1604,7 @@
   padding: 10px 12px 14px;
 }
 
-.bluplai-chat__thread-panel > .bluplai-chat__typing {
+.bluplai-chat__thread-message-stream > .bluplai-chat__typing {
   margin-left: 52px;
 }
 
