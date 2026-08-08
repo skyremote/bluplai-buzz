@@ -134,6 +134,8 @@ export interface ChatWorkspaceSnapshot {
   activeRoomId: string | null;
   currentUserId: string;
   rooms: ChatRoom[];
+  /** Projects the current viewer may explicitly add to Bluplai's AI scope. */
+  projects?: ChatProjectReference[];
   messages: ChatMessage[];
   readStates: ChatReadState[];
   members?: ChatMember[];

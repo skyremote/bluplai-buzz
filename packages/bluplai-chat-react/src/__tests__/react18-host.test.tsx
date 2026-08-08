@@ -501,23 +501,16 @@ describe("React 18 host compatibility", () => {
   it("sends multiple structured project mentions for comparison", async () => {
     const projectWorkspace: ChatWorkspaceSnapshot = {
       ...interactiveWorkspace,
-      rooms: [
-        ...interactiveWorkspace.rooms,
+      projects: [
         {
-          id: "room-project-sales",
-          name: "Selling at AI Speed · Internal",
-          unreadCount: 0,
-          projectId: "11111111-1111-4111-8111-111111111111",
-          projectName: "Selling at AI Speed",
+          id: "11111111-1111-4111-8111-111111111111",
+          displayName: "Selling at AI Speed",
           accountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           accountName: "Autodesk",
         },
         {
-          id: "room-project-renewal",
-          name: "Enterprise Renewal · Internal",
-          unreadCount: 0,
-          projectId: "22222222-2222-4222-8222-222222222222",
-          projectName: "Enterprise Renewal",
+          id: "22222222-2222-4222-8222-222222222222",
+          displayName: "Enterprise Renewal",
           accountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           accountName: "Autodesk",
         },

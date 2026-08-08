@@ -259,6 +259,9 @@ export function BluplaiChat({
   const mentionProjects = useMemo<ChatProjectReference[]>(() => {
     if (workspace.status !== "ready") return [];
     const byId = new Map<string, ChatProjectReference>();
+    for (const project of workspace.snapshot.projects ?? []) {
+      byId.set(project.id, project);
+    }
     for (const room of workspace.snapshot.rooms) {
       if (!room.projectId || !room.projectName || !room.accountId) continue;
       byId.set(room.projectId, {
