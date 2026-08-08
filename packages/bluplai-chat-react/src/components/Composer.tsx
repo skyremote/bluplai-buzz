@@ -25,6 +25,7 @@ export interface ComposerProps {
   disabled?: boolean;
   compact?: boolean;
   replyToLabel?: string;
+  replyMode?: "thread" | "ai";
   onCancelReply?: () => void;
   onSubmit: (value: ComposerSubmit) => Promise<void>;
   onUpload?: (file: File, signal: AbortSignal) => Promise<ChatAttachment>;
@@ -364,6 +365,7 @@ export function Composer({
   disabled,
   compact,
   replyToLabel,
+  replyMode = "thread",
   onCancelReply,
   onSubmit,
   onUpload,
@@ -1285,9 +1287,15 @@ export function Composer({
     >
       {renderPanel()}
       {replyToLabel ? (
-        <div className="bluplai-chat__replying-to">
+        <div className="bluplai-chat__replying-to" data-mode={replyMode}>
           <span>
-            Replying to <strong>{replyToLabel}</strong>
+            {replyMode === "ai" ? (
+              <>
+                <ChatIcon name="sparkles" /> Asking Bluplai
+              </>
+            ) : (
+              "Replying in thread"
+            )}
           </span>
           <button
             aria-label="Cancel reply"

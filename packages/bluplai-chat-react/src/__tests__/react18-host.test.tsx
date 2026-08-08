@@ -208,6 +208,119 @@ describe("React 18 host compatibility", () => {
       within(thread).getByText("Ship the compatibility gate first"),
     ).toBeTruthy();
     expect(within(thread).getByLabelText("Unread message")).toBeTruthy();
+    expect(within(thread).getByText("Replying in thread")).toBeTruthy();
+  });
+
+  it("shows when a direct reply will ask Bluplai", async () => {
+    const agentWorkspace: ChatWorkspaceSnapshot = {
+      ...interactiveWorkspace,
+      messages: [
+        {
+          id: "message-agent",
+          roomId: "room-general",
+          author: {
+            id: "bluplai",
+            displayName: "Bluplai",
+            role: "agent",
+          } as ChatWorkspaceSnapshot["messages"][number]["author"],
+          body: "I found three renewal risks.",
+          createdAt: "2026-08-03T08:00:00.000Z",
+          reactions: [],
+        },
+      ],
+    };
+    const { transport } = createTransport(agentWorkspace);
+    render(<BluplaiChat transport={transport} />);
+
+    const message = await screen.findByRole("article", {
+      name: "Message from Bluplai",
+    });
+    fireEvent.click(
+      within(message).getByRole("button", { name: "Reply in thread" }),
+    );
+
+    expect(screen.getByText("Asking Bluplai")).toBeTruthy();
+  });
+
+  it("directs an AI continuation to the latest Bluplai response", async () => {
+    const aiReply = {
+      id: "message-ai-reply",
+      roomId: "room-general",
+      author: {
+        id: "bluplai",
+        displayName: "Bluplai",
+        role: "agent",
+      } as ChatWorkspaceSnapshot["messages"][number]["author"],
+      body: "The account is waiting on procurement.",
+      createdAt: "2026-08-03T08:06:00.000Z",
+      threadRootId: "message-root",
+      parentMessageId: "message-root",
+      reactions: [],
+    };
+    const { commands, transport } = createTransport({
+      ...interactiveWorkspace,
+      messages: [...workspace.messages, aiReply],
+    });
+    render(<BluplaiChat transport={transport} />);
+    fireEvent.click(await screen.findByRole("button", { name: "2 replies" }));
+    const composers = screen.getAllByRole("combobox", {
+      name: /message general/i,
+    });
+    const threadComposer = composers.at(-1);
+    expect(threadComposer).toBeDefined();
+    if (!threadComposer) return;
+    fireEvent.change(threadComposer, {
+      target: { value: "What should we do next?" },
+    });
+    const form = threadComposer.closest("form");
+    expect(form).toBeTruthy();
+    if (!form) return;
+    fireEvent.submit(form);
+
+    await waitFor(() =>
+      expect(commands.at(-1)).toMatchObject({
+        type: "chat.send-message",
+        parentMessageId: "message-ai-reply",
+        threadRootId: "message-root",
+      }),
+    );
+  });
+
+  it("supports keyboard resizing and expanding a thread", async () => {
+    const { transport } = createTransport();
+    render(<BluplaiChat transport={transport} />);
+    fireEvent.click(await screen.findByRole("button", { name: "1 reply" }));
+
+    const separator = screen.getByRole("separator", { name: "Resize thread" });
+    expect(separator.getAttribute("aria-valuenow")).toBe("380");
+    fireEvent.keyDown(separator, { key: "ArrowLeft" });
+    expect(separator.getAttribute("aria-valuenow")).toBe("396");
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand thread" }));
+    expect(
+      screen.getByRole("button", { name: "Restore split view" }),
+    ).toBeTruthy();
+  });
+
+  it("renders structured record and disclosure labels", async () => {
+    const recordWorkspace: ChatWorkspaceSnapshot = {
+      ...workspace,
+      rooms: [
+        {
+          ...workspace.rooms[0],
+          disclosureScope: "shared",
+          canonicalRole: "project_shared",
+          accountName: "Autodesk",
+          projectName: "AI Revenue Studio",
+          followed: true,
+        } as ChatWorkspaceSnapshot["rooms"][number],
+      ],
+    };
+    const { transport } = createTransport(recordWorkspace);
+    render(<BluplaiChat transport={transport} />);
+
+    expect(await screen.findByText("Customer shared")).toBeTruthy();
+    expect(screen.getByText("Autodesk / AI Revenue Studio")).toBeTruthy();
   });
 
   it("renders live presence and publishes bounded typing state", async () => {

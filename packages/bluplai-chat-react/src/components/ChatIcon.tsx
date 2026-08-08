@@ -7,6 +7,7 @@ export type ChatIconName =
   | "chevron-down"
   | "code"
   | "file"
+  | "expand"
   | "format"
   | "hash"
   | "image"
@@ -20,6 +21,7 @@ export type ChatIconName =
   | "plus"
   | "search"
   | "send"
+  | "shrink"
   | "smile"
   | "sparkles"
   | "x";
@@ -49,6 +51,11 @@ const paths: Record<ChatIconName, JSX.Element> = {
     <>
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
       <path d="M14 2v6h6" />
+    </>
+  ),
+  expand: (
+    <>
+      <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />
     </>
   ),
   format: (
@@ -117,6 +124,11 @@ const paths: Record<ChatIconName, JSX.Element> = {
     <>
       <path d="m22 2-7 20-4-9-9-4Z" />
       <path d="M22 2 11 13" />
+    </>
+  ),
+  shrink: (
+    <>
+      <path d="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5" />
     </>
   ),
   smile: (

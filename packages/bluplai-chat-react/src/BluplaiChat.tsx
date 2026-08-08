@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { executeChatCommand } from "./capabilities";
 import { Composer, type ComposerSubmit } from "./components/Composer";
 import { ChatIcon } from "./components/ChatIcon";
@@ -42,6 +49,46 @@ type WorkspaceState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "ready"; snapshot: ChatWorkspaceSnapshot };
+
+const DEFAULT_THREAD_WIDTH = 380;
+const MIN_THREAD_WIDTH = 320;
+const MAX_THREAD_WIDTH = 720;
+const THREAD_WIDTH_STORAGE_KEY = "bluplai-chat.thread-width";
+
+function storedThreadWidth(): number {
+  const stored = globalThis.localStorage?.getItem(THREAD_WIDTH_STORAGE_KEY);
+  if (stored === null || stored === undefined || stored === "") {
+    return DEFAULT_THREAD_WIDTH;
+  }
+  const value = Number(stored);
+  return Number.isFinite(value)
+    ? Math.min(MAX_THREAD_WIDTH, Math.max(MIN_THREAD_WIDTH, value))
+    : DEFAULT_THREAD_WIDTH;
+}
+
+function roomDisclosureLabel(room: ChatRoom): string {
+  if (
+    room.canonicalRole?.endsWith("_shared") ||
+    room.disclosureScope === "shared"
+  ) {
+    return "Customer shared";
+  }
+  if (
+    room.canonicalRole?.endsWith("_internal") ||
+    room.disclosureScope === "internal"
+  ) {
+    return "Internal";
+  }
+  if (room.disclosureScope === "private") return "Private";
+  if (room.disclosureScope === "dm") return "Direct message";
+  return "Channel";
+}
+
+function roomRecordLabel(room: ChatRoom): string | null {
+  return (
+    [room.accountName, room.projectName].filter(Boolean).join(" / ") || null
+  );
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown transport error";
@@ -105,6 +152,8 @@ export function BluplaiChat({
   });
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [threadRoot, setThreadRoot] = useState<ChatMessage | null>(null);
+  const [threadWidth, setThreadWidth] = useState(storedThreadWidth);
+  const [threadExpanded, setThreadExpanded] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [serverSearchMessages, setServerSearchMessages] = useState<
@@ -128,6 +177,8 @@ export function BluplaiChat({
   const previousFocus = useRef<HTMLElement | null>(null);
   const searchCloseButton = useRef<HTMLButtonElement | null>(null);
   const threadCloseButton = useRef<HTMLButtonElement | null>(null);
+  const threadExpandButton = useRef<HTMLButtonElement | null>(null);
+  const resizeStart = useRef<{ x: number; width: number } | null>(null);
   const lastMarkedRead = useRef<string | null>(null);
   const initialRoomIdRef = useRef(initialRoomId);
   const uploadAttachment = transport.uploadAttachment?.bind(transport);
@@ -214,6 +265,11 @@ export function BluplaiChat({
       )
       .filter((message) => message.threadRootId === rootId);
   }, [projection, searchContextMessages, threadRoot]);
+  const threadAiTarget = useMemo(() => {
+    if (!threadRoot) return null;
+    const latest = threadReplies.at(-1) ?? threadRoot;
+    return latest.author.role === "agent" ? latest : null;
+  }, [threadReplies, threadRoot]);
   const typingIndicators =
     workspace.status === "ready" ? (workspace.snapshot.typing ?? []) : [];
   const currentUserId =
@@ -286,6 +342,7 @@ export function BluplaiChat({
 
   const closeThread = () => {
     setThreadRoot(null);
+    setThreadExpanded(false);
     restoreFocus();
   };
 
@@ -298,6 +355,16 @@ export function BluplaiChat({
   const openThread = (message: ChatMessage) => {
     rememberFocus();
     setThreadRoot(message);
+    setThreadExpanded(false);
+  };
+
+  const updateThreadWidth = (nextWidth: number) => {
+    const bounded = Math.min(
+      MAX_THREAD_WIDTH,
+      Math.max(MIN_THREAD_WIDTH, nextWidth),
+    );
+    setThreadWidth(bounded);
+    globalThis.localStorage?.setItem(THREAD_WIDTH_STORAGE_KEY, String(bounded));
   };
 
   useEffect(() => {
@@ -350,7 +417,7 @@ export function BluplaiChat({
             body,
             ...mentions,
             attachments,
-            parentMessageId: threadRoot.id,
+            parentMessageId: threadAiTarget?.id ?? threadRoot.id,
             threadRootId: threadRoot.threadRootId ?? threadRoot.id,
           }
         : {
@@ -389,6 +456,9 @@ export function BluplaiChat({
         selectedRoomId={selectedRoomId}
       />
     ) : null;
+  const workspaceStyle = {
+    "--bluplai-chat-thread-width": `${threadWidth}px`,
+  } as CSSProperties;
 
   return (
     <section
@@ -436,9 +506,11 @@ export function BluplaiChat({
             "bluplai-chat__workspace",
             !showRoomList ? "bluplai-chat__workspace--without-rail" : "",
             threadRoot ? "bluplai-chat__workspace--thread-open" : "",
+            threadExpanded ? "bluplai-chat__workspace--thread-expanded" : "",
           ]
             .filter(Boolean)
             .join(" ")}
+          style={workspaceStyle}
         >
           {showRoomList ? roomList : null}
           {projection ? (
@@ -468,8 +540,15 @@ export function BluplaiChat({
                       />
                     </span>
                     <h1>{projection.room.name}</h1>
+                    <span className="bluplai-chat__scope-badge">
+                      {roomDisclosureLabel(projection.room)}
+                    </span>
                   </div>
-                  {projection.room.topic ? (
+                  {roomRecordLabel(projection.room) ? (
+                    <p className="bluplai-chat__record-context">
+                      {roomRecordLabel(projection.room)}
+                    </p>
+                  ) : projection.room.topic ? (
                     <p>{projection.room.topic}</p>
                   ) : null}
                 </div>
@@ -671,6 +750,45 @@ export function BluplaiChat({
             <div className="bluplai-chat__state">Select a room to begin.</div>
           )}
           {threadRoot && projection ? (
+            <hr
+              aria-label="Resize thread"
+              aria-orientation="vertical"
+              aria-valuemax={MAX_THREAD_WIDTH}
+              aria-valuemin={MIN_THREAD_WIDTH}
+              aria-valuenow={threadWidth}
+              className="bluplai-chat__thread-resizer"
+              onDoubleClick={() => updateThreadWidth(DEFAULT_THREAD_WIDTH)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft")
+                  updateThreadWidth(threadWidth + 16);
+                else if (event.key === "ArrowRight")
+                  updateThreadWidth(threadWidth - 16);
+                else if (event.key === "Home")
+                  updateThreadWidth(MIN_THREAD_WIDTH);
+                else if (event.key === "End")
+                  updateThreadWidth(MAX_THREAD_WIDTH);
+                else return;
+                event.preventDefault();
+              }}
+              onPointerDown={(event) => {
+                resizeStart.current = { x: event.clientX, width: threadWidth };
+                event.currentTarget.setPointerCapture?.(event.pointerId);
+              }}
+              onPointerMove={(event) => {
+                if (!resizeStart.current) return;
+                updateThreadWidth(
+                  resizeStart.current.width +
+                    resizeStart.current.x -
+                    event.clientX,
+                );
+              }}
+              onPointerUp={() => {
+                resizeStart.current = null;
+              }}
+              tabIndex={0}
+            />
+          ) : null}
+          {threadRoot && projection ? (
             <aside
               aria-label={`Thread replies to ${threadRoot.body}`}
               className="bluplai-chat__thread-panel"
@@ -680,14 +798,26 @@ export function BluplaiChat({
             >
               <header>
                 <strong>Thread</strong>
-                <button
-                  aria-label="Close thread"
-                  onClick={closeThread}
-                  ref={threadCloseButton}
-                  type="button"
-                >
-                  <ChatIcon name="x" />
-                </button>
+                <div className="bluplai-chat__thread-actions">
+                  <button
+                    aria-label={
+                      threadExpanded ? "Restore split view" : "Expand thread"
+                    }
+                    onClick={() => setThreadExpanded((current) => !current)}
+                    ref={threadExpandButton}
+                    type="button"
+                  >
+                    <ChatIcon name={threadExpanded ? "shrink" : "expand"} />
+                  </button>
+                  <button
+                    aria-label="Close thread"
+                    onClick={closeThread}
+                    ref={threadCloseButton}
+                    type="button"
+                  >
+                    <ChatIcon name="x" />
+                  </button>
+                </div>
               </header>
               <MessageItem
                 compact
@@ -729,7 +859,8 @@ export function BluplaiChat({
                       ? (active) =>
                           setTyping(projection.room.id, {
                             active,
-                            parentMessageId: threadRoot.id,
+                            parentMessageId:
+                              threadAiTarget?.id ?? threadRoot.id,
                             threadRootId: threadRoot.id,
                           })
                       : undefined
@@ -740,7 +871,8 @@ export function BluplaiChat({
                           uploadAttachment(projection.room.id, file, signal)
                       : undefined
                   }
-                  replyToLabel={threadRoot.author.displayName}
+                  replyMode={threadAiTarget ? "ai" : "thread"}
+                  replyToLabel={threadAiTarget?.author.displayName ?? "thread"}
                   roomName={projection.room.name}
                   searchGifs={searchGifs}
                 />

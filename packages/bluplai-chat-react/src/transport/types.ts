@@ -3,6 +3,8 @@ export interface ChatAuthor {
   id: string;
   displayName: string;
   avatarUrl?: string | null;
+  /** Distinguishes human replies from direct AI continuations. */
+  role?: "owner" | "admin" | "member" | "guest" | "agent";
 }
 
 /** A viewer-relative aggregate reaction attached to a message. */
@@ -89,6 +91,15 @@ export interface ChatRoom {
   disclosureScope?: "internal" | "shared" | "private" | "dm";
   accountId?: string | null;
   projectId?: string | null;
+  canonicalRole?:
+    | "account_internal"
+    | "account_shared"
+    | "project_internal"
+    | "project_shared"
+    | null;
+  accountName?: string | null;
+  projectName?: string | null;
+  followed?: boolean;
   memberIds?: string[];
   notificationPreference?: "all" | "mentions" | "muted";
   canManageMembers?: boolean;

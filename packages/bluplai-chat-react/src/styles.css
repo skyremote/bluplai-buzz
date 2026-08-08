@@ -130,14 +130,22 @@
 }
 
 .bluplai-chat__workspace--thread-open {
-  grid-template-columns: minmax(214px, 252px) minmax(360px, 1fr) minmax(
-      320px,
+  grid-template-columns: minmax(214px, 252px) minmax(360px, 1fr) 7px var(
+      --bluplai-chat-thread-width,
       380px
     );
 }
 
 .bluplai-chat__workspace--without-rail.bluplai-chat__workspace--thread-open {
-  grid-template-columns: minmax(360px, 1fr) minmax(320px, 380px);
+  grid-template-columns: minmax(360px, 1fr) 7px var(
+      --bluplai-chat-thread-width,
+      380px
+    );
+}
+
+.bluplai-chat__workspace--thread-expanded,
+.bluplai-chat__workspace--without-rail.bluplai-chat__workspace--thread-expanded {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .bluplai-chat__rooms {
@@ -310,6 +318,22 @@
   align-items: center;
   display: flex;
   gap: 7px;
+}
+
+.bluplai-chat__scope-badge {
+  background: var(--bluplai-chat-surface-subtle);
+  border: 1px solid var(--bluplai-chat-border);
+  border-radius: 999px;
+  color: var(--bluplai-chat-muted);
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 20px;
+  padding: 0 8px;
+}
+
+.bluplai-chat__record-context {
+  font-weight: 550;
 }
 
 .bluplai-chat__room-title-icon {
@@ -1014,6 +1038,21 @@
   padding: 7px 8px 7px 10px;
 }
 
+.bluplai-chat__replying-to[data-mode="ai"] {
+  color: var(--bluplai-chat-accent);
+}
+
+.bluplai-chat__replying-to span {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.bluplai-chat__replying-to span svg {
+  height: 14px;
+  width: 14px;
+}
+
 .bluplai-chat__replying-to button,
 .bluplai-chat__composer-attachments button {
   align-items: center;
@@ -1381,6 +1420,32 @@
   min-width: 0;
 }
 
+.bluplai-chat__thread-resizer {
+  background: var(--bluplai-chat-border);
+  border: 0;
+  cursor: col-resize;
+  margin: 0;
+  min-height: 0;
+  outline: 0;
+  position: relative;
+  touch-action: none;
+}
+
+.bluplai-chat__thread-resizer::after {
+  background: transparent;
+  bottom: 0;
+  content: "";
+  left: -4px;
+  position: absolute;
+  right: -4px;
+  top: 0;
+}
+
+.bluplai-chat__thread-resizer:hover,
+.bluplai-chat__thread-resizer:focus-visible {
+  background: var(--bluplai-chat-accent);
+}
+
 .bluplai-chat__thread-panel > header,
 .bluplai-chat__search-panel > header {
   align-items: center;
@@ -1410,6 +1475,12 @@
   justify-content: center;
   padding: 0;
   width: 30px;
+}
+
+.bluplai-chat__thread-actions {
+  align-items: center;
+  display: flex;
+  gap: 3px;
 }
 
 .bluplai-chat__thread-panel > header button:hover,
@@ -1545,6 +1616,10 @@
 
   .bluplai-chat__thread-panel {
     border-left: 0;
+  }
+
+  .bluplai-chat__thread-resizer {
+    display: none;
   }
 }
 
@@ -1719,4 +1794,10 @@
     scroll-behavior: auto;
     transition-duration: 0.01ms;
   }
+}
+
+.bluplai-chat__workspace--thread-expanded > .bluplai-chat__rooms,
+.bluplai-chat__workspace--thread-expanded > .bluplai-chat__timeline,
+.bluplai-chat__workspace--thread-expanded > .bluplai-chat__thread-resizer {
+  display: none;
 }
