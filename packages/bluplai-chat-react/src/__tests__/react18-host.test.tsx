@@ -139,6 +139,28 @@ afterEach(() => {
 });
 
 describe("React 18 host compatibility", () => {
+  it("opens a retained room at its newest message", () => {
+    const scrollHeight = vi
+      .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockReturnValue(960);
+    const clientHeight = vi
+      .spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockReturnValue(320);
+    const { transport } = createTransport();
+    const retainedTransport = transport as BuzzChatTransport & {
+      getSnapshot: () => ChatWorkspaceSnapshot;
+    };
+    retainedTransport.getSnapshot = () => workspace;
+
+    render(<BluplaiChat transport={retainedTransport} />);
+
+    expect(
+      screen.getByRole("log", { name: "Messages in General" }).scrollTop,
+    ).toBe(960);
+    scrollHeight.mockRestore();
+    clientHeight.mockRestore();
+  });
+
   it("forces attachment links to download without retaining opener access", () => {
     render(
       <MessageItem
@@ -238,6 +260,25 @@ describe("React 18 host compatibility", () => {
 
     expect(screen.getByRole("heading", { name: "General" })).toBeTruthy();
     expect(screen.queryByText("Loading Bluplai Chat…")).toBeNull();
+  });
+
+  it("keeps a retained workspace visible when background refresh fails", async () => {
+    const { transport } = createTransport();
+    const retainedTransport = transport as BuzzChatTransport & {
+      getSnapshot: () => ChatWorkspaceSnapshot;
+    };
+    retainedTransport.getSnapshot = () => workspace;
+    retainedTransport.loadWorkspace = vi.fn(async () => {
+      throw new Error("offline");
+    });
+
+    render(<BluplaiChat transport={retainedTransport} />);
+    await waitFor(() =>
+      expect(retainedTransport.loadWorkspace).toHaveBeenCalledOnce(),
+    );
+
+    expect(screen.getByRole("heading", { name: "General" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("renders rooms, threads, reactions, and read state from the transport", async () => {

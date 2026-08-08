@@ -13,6 +13,7 @@
       .demo-shell { display: grid; grid-template-columns: 64px 240px minmax(0, 1fr); height: 100%; }
       .demo-icon-rail { align-items: center; background: #18233f; color: white; display: flex; flex-direction: column; gap: 14px; padding-top: 14px; }
       .demo-room-rail { border-right: 1px solid #e1e5ec; min-width: 0; }
+      .demo-shell > main { min-height: 0; overflow: hidden; }
       @media (max-width: 700px) {
         .demo-shell { grid-template-columns: minmax(0, 1fr); }
         .demo-icon-rail, .demo-room-rail { display: none; }
