@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -189,6 +190,12 @@ export function BluplaiChat({
   const threadExpandButton = useRef<HTMLButtonElement | null>(null);
   const resizeStart = useRef<{ x: number; width: number } | null>(null);
   const lastMarkedRead = useRef<string | null>(null);
+  const messageStream = useRef<HTMLDivElement | null>(null);
+  const messageViewport = useRef<{
+    roomId: string | null;
+    latestMessageId: string | null;
+    pinnedToNewest: boolean;
+  }>({ roomId: null, latestMessageId: null, pinnedToNewest: true });
   const initialRoomIdRef = useRef(initialRoomId);
   const uploadAttachment = transport.uploadAttachment?.bind(transport);
   const loadOlderMessages = transport.loadOlderMessages?.bind(transport);
@@ -213,7 +220,11 @@ export function BluplaiChat({
       .then(acceptSnapshot)
       .catch((error: unknown) => {
         if (!mounted || controller.signal.aborted) return;
-        setWorkspace({ status: "error", message: errorMessage(error) });
+        setWorkspace((current) =>
+          current.status === "ready"
+            ? current
+            : { status: "error", message: errorMessage(error) },
+        );
       });
     return () => {
       mounted = false;
@@ -320,6 +331,35 @@ export function BluplaiChat({
         )
       : [];
   const searchRoomId = projection?.room.id;
+
+  useLayoutEffect(() => {
+    const stream = messageStream.current;
+    if (!stream || !projection) return;
+    const latestMessageId = projection.roots.at(-1)?.id ?? null;
+    const previous = messageViewport.current;
+    const roomChanged = previous.roomId !== projection.room.id;
+    const firstMessagesArrived =
+      previous.roomId === projection.room.id &&
+      previous.latestMessageId === null &&
+      latestMessageId !== null;
+    const newestMessageChanged =
+      previous.roomId === projection.room.id &&
+      previous.latestMessageId !== null &&
+      latestMessageId !== previous.latestMessageId;
+    if (
+      roomChanged ||
+      firstMessagesArrived ||
+      (newestMessageChanged && previous.pinnedToNewest)
+    ) {
+      stream.scrollTop = stream.scrollHeight;
+    }
+    messageViewport.current = {
+      roomId: projection.room.id,
+      latestMessageId,
+      pinnedToNewest:
+        stream.scrollHeight - stream.scrollTop - stream.clientHeight <= 48,
+    };
+  }, [projection]);
 
   useEffect(() => {
     const search = transport.searchMessages?.bind(transport);
@@ -668,7 +708,20 @@ export function BluplaiChat({
               {roomContext ? (
                 <div className="bluplai-chat__room-context">{roomContext}</div>
               ) : null}
-              <div className="bluplai-chat__message-stream">
+              <div
+                aria-label={`Messages in ${projection.room.name}`}
+                className="bluplai-chat__message-stream"
+                onScroll={(event) => {
+                  const stream = event.currentTarget;
+                  messageViewport.current.pinnedToNewest =
+                    stream.scrollHeight -
+                      stream.scrollTop -
+                      stream.clientHeight <=
+                    48;
+                }}
+                ref={messageStream}
+                role="log"
+              >
                 {loadOlderMessages &&
                 (historyHasMoreOverride[projection.room.id] ??
                   projection.room.hasOlderMessages) ? (
