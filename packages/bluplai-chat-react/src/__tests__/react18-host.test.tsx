@@ -267,6 +267,9 @@ describe("React 18 host compatibility", () => {
     ).toBeTruthy();
     expect(within(thread).getByLabelText("Unread message")).toBeTruthy();
     expect(within(thread).getByText("Replying in thread")).toBeTruthy();
+    expect(
+      within(thread).getByRole("log", { name: "Thread messages" }),
+    ).toBeTruthy();
   });
 
   it.each([
