@@ -167,6 +167,48 @@ describe("React 18 host compatibility", () => {
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
   });
 
+  it("renders GFM tables, headings, lists, links, and code as message content", () => {
+    render(
+      <MessageItem
+        message={{
+          id: "message-markdown",
+          roomId: "room-general",
+          author: { id: "bluplai", displayName: "Bluplai" },
+          body: [
+            "## Project comparison",
+            "",
+            "| Project | Status |",
+            "| --- | --- |",
+            "| Alpha | **Ready** |",
+            "| Beta | `Blocked` |",
+            "",
+            "- @Bluplai confirm owner",
+            "- Share [plan](https://example.com/plan)",
+          ].join("\n"),
+          createdAt: "2026-08-03T08:00:00.000Z",
+          reactions: [],
+        }}
+        mentionNames={["Bluplai"]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Project comparison" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("table")).toBeTruthy();
+    expect(
+      screen.getByRole("region", { name: "Scrollable message table" }),
+    ).toBeTruthy();
+    expect(screen.getByText("@Bluplai").closest("li")).toBeTruthy();
+    expect(screen.getByText("@Bluplai").className).toContain(
+      "bluplai-chat__mention",
+    );
+    expect(
+      screen.getByRole("link", { name: "plan" }).getAttribute("target"),
+    ).toBe("_blank");
+    expect(screen.getByText("Blocked").tagName).toBe("CODE");
+  });
+
   it("mounts and unmounts under React 18.3 without owning the host runtime", async () => {
     expect(React.version).toBe("18.3.1");
     const { disconnect, transport } = createTransport();

@@ -1,6 +1,6 @@
 {
   "name": "@bluplai/buzz-chat-react",
-  "version": "0.1.0-bluplai.7",
+  "version": "0.1.0-bluplai.8",
   "description": "Browser-native Bluplai Chat surface powered by Buzz",
   "license": "Apache-2.0",
   "type": "module",
@@ -27,6 +27,10 @@
   "peerDependencies": {
     "react": ">=18.3.0 <20",
     "react-dom": ">=18.3.0 <20"
+  },
+  "dependencies": {
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",

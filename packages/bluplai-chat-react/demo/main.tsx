@@ -114,6 +114,16 @@ const snapshot: ChatWorkspaceSnapshot = {
       reactions: [],
       deliveryState: "sent",
     },
+    {
+      id: "m5",
+      roomId: "launch",
+      author: { id: "bluplai", displayName: "Bluplai", role: "agent" },
+      body: "## Launch review\n\n| Area | Status |\n| --- | --- |\n| Mobile composer | **Ready** |\n| Agent handoffs | `In thread` |\n\n- Confirm the owner\n- Share the release note",
+      createdAt: "2026-08-07T16:43:00Z",
+      parentMessageId: "m4",
+      threadRootId: "m4",
+      reactions: [],
+    },
   ],
   readStates: [
     {

@@ -1,4 +1,7 @@
-import type { ReactNode } from "react";
+import { Children, type ReactNode } from "react";
+import type { Components } from "react-markdown";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const URL_TOKEN = /https:\/\/[^\s]+/gu;
 
@@ -6,16 +9,38 @@ function escapePattern(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function inlineToken(mentionNames: string[]): RegExp {
+function mentionPattern(mentionNames: string[]): RegExp {
   const knownMentions = mentionNames
     .filter(Boolean)
     .sort((left, right) => right.length - left.length)
     .map((name) => escapePattern(`@${name}`));
   const mention = [...knownMentions, "@[\\p{L}\\p{N}._-]+"].join("|");
-  return new RegExp(
-    `(https:\\/\\/[^\\s]+|\\*\\*[^*\\n]+\\*\\*|~~[^~\\n]+~~|\`[^\`\\n]+\`|\\*[^*\\n]+\\*|${mention})`,
-    "gu",
-  );
+  return new RegExp(`(${mention})`, "gu");
+}
+
+function renderMentions(
+  children: ReactNode,
+  mentionNames: string[],
+): ReactNode {
+  const pattern = mentionPattern(mentionNames);
+  return Children.map(children, (child) => {
+    if (typeof child !== "string") return child;
+    const output: ReactNode[] = [];
+    let cursor = 0;
+    for (const part of child.split(pattern)) {
+      if (part.startsWith("@")) {
+        output.push(
+          <span className="bluplai-chat__mention" key={`${part}-${cursor}`}>
+            {part}
+          </span>,
+        );
+      } else if (part) {
+        output.push(part);
+      }
+      cursor += part.length;
+    }
+    return output;
+  });
 }
 
 function isGifUrl(value: string): boolean {
@@ -33,43 +58,57 @@ function isGifUrl(value: string): boolean {
   }
 }
 
-function renderInline(
-  line: string,
-  lineIndex: number,
-  mentionNames: string[],
-): ReactNode[] {
-  const output: ReactNode[] = [];
-  let cursor = 0;
-  for (const match of line.matchAll(inlineToken(mentionNames))) {
-    const index = match.index ?? 0;
-    if (index > cursor) output.push(line.slice(cursor, index));
-    const token = match[0];
-    const key = `${lineIndex}-${index}`;
-    if (token.startsWith("https://")) {
-      output.push(
-        <a href={token} key={key} rel="noopener noreferrer" target="_blank">
-          {token}
-        </a>,
-      );
-    } else if (token.startsWith("**")) {
-      output.push(<strong key={key}>{token.slice(2, -2)}</strong>);
-    } else if (token.startsWith("~~")) {
-      output.push(<s key={key}>{token.slice(2, -2)}</s>);
-    } else if (token.startsWith("`")) {
-      output.push(<code key={key}>{token.slice(1, -1)}</code>);
-    } else if (token.startsWith("*")) {
-      output.push(<em key={key}>{token.slice(1, -1)}</em>);
-    } else {
-      output.push(
-        <span className="bluplai-chat__mention" key={key}>
-          {token}
-        </span>,
-      );
-    }
-    cursor = index + token.length;
-  }
-  if (cursor < line.length) output.push(line.slice(cursor));
-  return output;
+function markdownComponents(mentionNames: string[]): Components {
+  return {
+    a: ({ children, ...props }) => (
+      <a {...props} rel="noopener noreferrer" target="_blank">
+        {children}
+      </a>
+    ),
+    blockquote: ({ children, ...props }) => (
+      <blockquote {...props}>
+        {renderMentions(children, mentionNames)}
+      </blockquote>
+    ),
+    em: ({ children, ...props }) => (
+      <em {...props}>{renderMentions(children, mentionNames)}</em>
+    ),
+    h1: ({ children, ...props }) => (
+      <h1 {...props}>{renderMentions(children, mentionNames)}</h1>
+    ),
+    h2: ({ children, ...props }) => (
+      <h2 {...props}>{renderMentions(children, mentionNames)}</h2>
+    ),
+    h3: ({ children, ...props }) => (
+      <h3 {...props}>{renderMentions(children, mentionNames)}</h3>
+    ),
+    h4: ({ children, ...props }) => (
+      <h4 {...props}>{renderMentions(children, mentionNames)}</h4>
+    ),
+    li: ({ children, ...props }) => (
+      <li {...props}>{renderMentions(children, mentionNames)}</li>
+    ),
+    p: ({ children, ...props }) => (
+      <p {...props}>{renderMentions(children, mentionNames)}</p>
+    ),
+    strong: ({ children, ...props }) => (
+      <strong {...props}>{renderMentions(children, mentionNames)}</strong>
+    ),
+    table: ({ children, ...props }) => (
+      <section
+        aria-label="Scrollable message table"
+        className="bluplai-chat__table-scroll"
+      >
+        <table {...props}>{children}</table>
+      </section>
+    ),
+    td: ({ children, ...props }) => (
+      <td {...props}>{renderMentions(children, mentionNames)}</td>
+    ),
+    th: ({ children, ...props }) => (
+      <th {...props}>{renderMentions(children, mentionNames)}</th>
+    ),
+  };
 }
 
 export function MessageContent({
@@ -86,26 +125,17 @@ export function MessageContent({
   let text = body;
   for (const gifUrl of gifUrls) text = text.replace(gifUrl, "");
   text = text.replace(/\n{3,}/g, "\n\n").trim();
-  let lineOffset = 0;
-  const lines = text.split("\n").map((line) => {
-    const segment = { key: `${lineOffset}-${line}`, line, offset: lineOffset };
-    lineOffset += line.length + 1;
-    return segment;
-  });
 
   return (
     <div className="bluplai-chat__message-content">
-      {text
-        ? lines.map((segment) => (
-            <span className="bluplai-chat__message-line" key={segment.key}>
-              {segment.line ? (
-                renderInline(segment.line, segment.offset, mentionNames)
-              ) : (
-                <br />
-              )}
-            </span>
-          ))
-        : null}
+      {text ? (
+        <ReactMarkdown
+          components={markdownComponents(mentionNames)}
+          remarkPlugins={[remarkGfm]}
+        >
+          {text}
+        </ReactMarkdown>
+      ) : null}
       {gifUrls.length ? (
         <div className="bluplai-chat__message-gifs">
           {gifUrls.map((gifUrl) => (
