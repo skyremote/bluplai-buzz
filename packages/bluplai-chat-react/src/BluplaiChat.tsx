@@ -148,10 +148,18 @@ export function BluplaiChat({
   roomContext,
   onNotificationPreferenceChange,
 }: BluplaiChatProps) {
-  const [workspace, setWorkspace] = useState<WorkspaceState>({
-    status: "loading",
-  });
-  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const retainedSnapshot = useMemo(
+    () => transport.getSnapshot?.() ?? null,
+    [transport],
+  );
+  const [workspace, setWorkspace] = useState<WorkspaceState>(() =>
+    retainedSnapshot
+      ? { status: "ready", snapshot: retainedSnapshot }
+      : { status: "loading" },
+  );
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(() =>
+    retainedSnapshot ? resolveRoomId(retainedSnapshot, initialRoomId) : null,
+  );
   const [threadRoot, setThreadRoot] = useState<ChatMessage | null>(null);
   const [threadWidth, setThreadWidth] = useState(storedThreadWidth);
   const [threadExpanded, setThreadExpanded] = useState(false);
@@ -719,14 +727,20 @@ export function BluplaiChat({
                       ...mentionProjects.map((project) => project.displayName),
                     ]}
                     onOpenThread={
-                      !readOnly ||
-                      (projection.repliesByRoot.get(message.id)?.length ?? 0) >
-                        0
+                      !message.id.startsWith("local:") &&
+                      message.deliveryState !== "sending" &&
+                      message.deliveryState !== "failed" &&
+                      (!readOnly ||
+                        (projection.repliesByRoot.get(message.id)?.length ??
+                          0) > 0)
                         ? openThread
                         : undefined
                     }
                     onReact={
-                      readOnly
+                      readOnly ||
+                      message.id.startsWith("local:") ||
+                      message.deliveryState === "sending" ||
+                      message.deliveryState === "failed"
                         ? undefined
                         : (item, emoji) => void react(item, emoji)
                     }

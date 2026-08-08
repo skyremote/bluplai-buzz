@@ -199,6 +199,8 @@ export interface ChatHistoryLoadResult {
  * gateway adapter; the Buzz desktop may supply a direct-relay adapter later.
  */
 export interface BuzzChatTransport {
+  /** Last authorised in-memory projection, used to avoid a loading flash on remount. */
+  getSnapshot?(): ChatWorkspaceSnapshot | null;
   loadWorkspace(options: LoadWorkspaceOptions): Promise<ChatWorkspaceSnapshot>;
   subscribe(listener: (snapshot: ChatWorkspaceSnapshot) => void): () => void;
   execute(command: AllowedChatCommand): Promise<ChatCommandResult>;
