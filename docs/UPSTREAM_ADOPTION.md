@@ -6,6 +6,23 @@ The range contains exactly **151 commits**. Classification controls what may
 enter the Bluplai browser package and managed host contract; it does not erase
 upstream source retained in this full fork.
 
+## Urgent post-base follow-up
+
+After the 151-commit range was frozen, upstream landed
+`97aa9e31856edb9d8abcdcb33c472027f5588890` (`block/buzz#5406`) directly on
+the accepted upstream head. Its four-file patch is adopted as an urgent,
+reviewed follow-up: it removes the complete Welcome guidance layer after
+dismissal, scopes dismissal to the active identity across both Welcome
+channels, wires that identity through `ChannelPane`, and makes the onboarding
+expectation match the stable lowercase `welcome-everyone` title.
+
+This follow-up is not counted in or represented as part of the 151-commit
+range. `UPSTREAM_BASE` remains
+`5bf78671f45178f8de02ba18d3d321cbbf19cd1f`, preserving the audited merge's
+exact second-parent and ancestry contract. The upstream follow-up SHA above is
+the source provenance for the patch applied in the fork commit immediately
+after the audited merge.
+
 ## Decision meanings
 
 - **Adopt** — take the upstream server, protocol or security behavior directly.
