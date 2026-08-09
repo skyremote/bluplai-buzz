@@ -25,6 +25,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
+          persist-credentials: false
           ref: main
       - name: Activate pinned toolchain
         uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
@@ -42,6 +43,8 @@ jobs:
           current_base="$(tr -d '[:space:]' < UPSTREAM_BASE)"
           upstream_head="$(git rev-parse upstream/main)"
           git cat-file -e "${current_base}^{commit}"
+          git merge-base --is-ancestor "$current_base" "$upstream_head"
+          git merge-base --is-ancestor "$current_base" HEAD
 
           if [ "$current_base" = "$upstream_head" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -86,6 +89,11 @@ jobs:
 
           git add UPSTREAM_BASE
           git commit -s -m "chore: sync upstream ${upstream_head:0:12}"
+          candidate_head="$(git rev-parse HEAD)"
+          test "$(git rev-parse "${candidate_head}^1")" = "$GITHUB_SHA"
+          test "$(git rev-parse "${candidate_head}^2")" = "$upstream_head"
+          test "$(git show "${candidate_head}:UPSTREAM_BASE" | tr -d '[:space:]')" = "$upstream_head"
+          git merge-base --is-ancestor "$upstream_head" "$candidate_head"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "upstream_head=$upstream_head" >> "$GITHUB_OUTPUT"
@@ -103,19 +111,81 @@ jobs:
         run: |
           just check
           just test-unit
+      - name: Pack and attest candidate
+        if: steps.prepare.outputs.changed == 'true'
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="$RUNNER_TEMP/bluplai-chat-package"
+          mkdir -p "$package_dir"
+          pnpm --filter @bluplai/buzz-chat-react pack --pack-destination "$package_dir"
+          tarball="$(find "$package_dir" -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+          test -n "$tarball"
+
+          upstream_sha="$(tr -d '[:space:]' < UPSTREAM_BASE)"
+          fork_sha="$(git rev-parse HEAD)"
+          first_parent_sha="$(git rev-parse HEAD^1)"
+          second_parent_sha="$(git rev-parse HEAD^2)"
+          test "$second_parent_sha" = "$upstream_sha"
+          git merge-base --is-ancestor "$upstream_sha" "$fork_sha"
+          package_version="$(node -p "require('./packages/bluplai-chat-react/package.json').version")"
+          tarball_sha256="$(sha256sum "$tarball" | awk '{print $1}')"
+
+          jq -n \
+            --arg upstream_sha "$upstream_sha" \
+            --arg fork_sha "$fork_sha" \
+            --arg first_parent_sha "$first_parent_sha" \
+            --arg second_parent_sha "$second_parent_sha" \
+            --arg package_version "$package_version" \
+            --arg tarball "$(basename "$tarball")" \
+            --arg tarball_sha256 "$tarball_sha256" \
+            '{
+              schema_version: 1,
+              upstream: {repository: "https://github.com/block/buzz", sha: $upstream_sha},
+              fork: {
+                repository: "https://github.com/skyremote/bluplai-buzz",
+                sha: $fork_sha,
+                audited_merge_sha: $fork_sha,
+                first_parent_sha: $first_parent_sha,
+                second_parent_sha: $second_parent_sha
+              },
+              package: {
+                name: "@bluplai/buzz-chat-react",
+                version: $package_version,
+                tarball: $tarball,
+                sha256: $tarball_sha256
+              }
+            }' > "$RUNNER_TEMP/package-provenance.json"
+
+          {
+            echo "### Bluplai package candidate"
+            echo
+            echo "- Upstream SHA: \`$upstream_sha\`"
+            echo "- Fork SHA: \`$fork_sha\`"
+            echo "- Package version: \`$package_version\`"
+            echo "- Tarball SHA-256: \`$tarball_sha256\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "fork_sha=$fork_sha" >> "$GITHUB_OUTPUT"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
       - name: Upload delta report
         if: always() && steps.prepare.outputs.changed == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: upstream-delta-${{ steps.prepare.outputs.upstream_head }}
-          path: ${{ runner.temp }}/upstream-delta.md
+          path: |
+            ${{ runner.temp }}/upstream-delta.md
+            ${{ steps.candidate.outputs.tarball }}
+            ${{ runner.temp }}/package-provenance.json
           if-no-files-found: error
           retention-days: 30
       - name: Push reviewed-sync branch
         if: steps.prepare.outputs.changed == 'true'
         env:
           BRANCH: ${{ steps.prepare.outputs.branch }}
-        run: git push --set-upstream origin "HEAD:$BRANCH"
+          GH_TOKEN: ${{ github.token }}
+        run: git push --set-upstream "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:$BRANCH"
       - name: Open draft pull request
         if: steps.prepare.outputs.changed == 'true'
         env:

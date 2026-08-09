@@ -42,21 +42,41 @@ pnpm --filter @bluplai/buzz-chat-react test
 pnpm --filter @bluplai/buzz-chat-react build
 ```
 
-The compatibility workflow also packs the built package and uploads an
-artifact named with `${github.sha}`. Registry publication, if enabled later,
-must use an immutable prerelease version containing the fork commit and must be
-an explicit release action rather than a branch-push side effect.
+The compatibility workflow packs the built package and uploads an artifact
+named with the full fork SHA. It records the upstream SHA, fork SHA, audited
+merge SHA and both merge parents, package version and tarball SHA-256. It uses
+full Git history to prove `UPSTREAM_BASE` is the audited merge's second parent
+and an ancestor of the candidate. Registry publication, if enabled later, must
+use an immutable prerelease version containing the fork commit and must be an
+explicit release action rather than a branch-push side effect.
+
+The host repository is private while this fork is public. Candidate and pull
+request workflows never receive a private-host credential or checkout. After
+a successful push to `main`, the trusted default-branch
+`bluplai-host-compatibility.yml` workflow downloads the immutable artifact by
+workflow-run ID, verifies its hash and full merge-parent chain, then checks out
+the host with a fine-grained read-only `BLUPLAI_HOST_READ_TOKEN`. Checkout uses
+`persist-credentials: false`, so candidate package code runs without that
+credential. A missing or expired token is a release blocker, not permission to
+bypass the host gate.
 
 ## Human-reviewed upstream sync
 
 `.github/workflows/upstream-sync.yml` runs weekly or manually. It:
 
-1. Fetches `upstream/main` and validates the current `UPSTREAM_BASE` object.
+1. Fetches `upstream/main` and proves the current `UPSTREAM_BASE` is an
+   ancestor of both the fork and proposed upstream head.
 2. Creates a dedicated merge branch and an upstream-delta report.
 3. Updates `UPSTREAM_BASE` within the proposed merge commit.
 4. Runs the browser compatibility gate plus upstream `just check` and
    `just test-unit` gates.
-5. Pushes the branch and opens a **draft** pull request.
+5. Packs and hashes the exact browser archive with its explicit merge-parent
+   chain; no private-host credential is available in this candidate workflow.
+6. Pushes the branch and opens a **draft** pull request.
+
+After reviewed merge, the compatibility workflow emits a new immutable
+main-branch artifact and the trusted post-merge host workflow runs the private
+host contract tests and production build.
 
 The workflow contains no deployment, image publication, package publication,
 or automatic merge step. A maintainer must review the incoming commits, the
@@ -69,7 +89,18 @@ broad unrelated desktop rewrite, stop the sync. Do not weaken the Tauri, React,
 or hidden-capability checks to make the merge pass; reassess the extraction
 contract first.
 
-### Recorded sync rehearsal
+### Accepted 2026-08-09 upstream boundary
+
+The current `UPSTREAM_BASE` advances from
+`a5dbdf5e61e4c512acd99c219c79c154ddb57295` to
+`5bf78671f45178f8de02ba18d3d321cbbf19cd1f`, reconciling 151 upstream commits
+against 19 fork commits. `docs/UPSTREAM_ADOPTION.md` is the exhaustive
+Adopt/Adapt/Exclude ledger and records the three conflict resolutions. The
+accepted release chain is commit- and archive-addressed in the Bluplai host's
+`internal-docs/releases/buzz-package-provenance.json`; the workflow rejects a
+release candidate when that record does not match.
+
+### Recorded 2026-08-03 sync rehearsal
 
 On 2026-08-03 the maintained fork at
 `c1208cd43b068c21a342dc0709edd3099e247e48` fetched upstream main at
