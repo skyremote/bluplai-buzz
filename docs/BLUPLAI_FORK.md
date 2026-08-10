@@ -70,7 +70,7 @@ deployment, host, or repository-write authority.
 
 **Current attestation status (2026-08-10): blocked.** The manifest and workflow
 are on the review branch, not `main`, so GitHub has not produced an attestation
-for `@bluplai/buzz-chat-react@0.1.0-bluplai.14`. Do not describe the archive as
+for `@bluplai/buzz-chat-react@0.1.0-bluplai.15`. Do not describe the archive as
 attested until the reviewed commit lands on `main` and the main-only workflow
 succeeds. This status does not authorize pushing, merging, publishing, or
 deploying the package.
@@ -89,7 +89,7 @@ upload or installation. The source digest and signer-workflow digest must both
 equal that landed commit; `refs/heads/main` alone is mutable and insufficient.
 
 ```bash
-gh attestation verify bluplai-buzz-chat-react-0.1.0-bluplai.14.tgz \
+gh attestation verify bluplai-buzz-chat-react-0.1.0-bluplai.15.tgz \
   --repo skyremote/bluplai-buzz \
   --signer-workflow skyremote/bluplai-buzz/.github/workflows/bluplai-package-attestation.yml \
   --source-ref refs/heads/main \

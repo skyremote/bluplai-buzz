@@ -21,12 +21,12 @@ const forkDocumentation = read("docs/BLUPLAI_FORK.md");
 const expectedRelease = {
   schema_version: 1,
   release_id:
-    "@bluplai/buzz-chat-react@0.1.0-bluplai.14+5b1b3399f53d500486049b2ff33d9ae5c0fdac2f",
+    "@bluplai/buzz-chat-react@0.1.0-bluplai.15+7baefe6d194bb792666c8cfabec24fc1410ec289",
   source: {
     repository: "https://github.com/skyremote/bluplai-buzz",
     package_path: "packages/bluplai-chat-react",
-    package_commit: "5b1b3399f53d500486049b2ff33d9ae5c0fdac2f",
-    package_tree: "1e0445f90bf3c19068d429efa354771261957828",
+    package_commit: "7baefe6d194bb792666c8cfabec24fc1410ec289",
+    package_tree: "0f838c8a632da21bd62e1ad1bb2dffb891ccc2bc",
     upstream_repository: "https://github.com/block/buzz",
     upstream_commit: "5bf78671f45178f8de02ba18d3d321cbbf19cd1f",
     audited_merge_commit: "1f4dd94b31e7e347b82e64756920eb457468f45f",
@@ -41,9 +41,9 @@ const expectedRelease = {
   },
   package: {
     name: "@bluplai/buzz-chat-react",
-    version: "0.1.0-bluplai.14",
-    filename: "bluplai-buzz-chat-react-0.1.0-bluplai.14.tgz",
-    sha256: "92f9f1c791bd1542d71d0717fa6a3754ccb3cbb230b0a8bb8db905a450308be2",
+    version: "0.1.0-bluplai.15",
+    filename: "bluplai-buzz-chat-react-0.1.0-bluplai.15.tgz",
+    sha256: "7674c3ef087cd3d6fe0ab74e6f15810079d47bcdaeee680e7885dd3491d69227",
   },
   attestation: {
     workflow: ".github/workflows/bluplai-package-attestation.yml",
@@ -125,7 +125,7 @@ function assertExactLiveAttestationContract(documentation) {
   );
   assert.match(
     documentation,
-    /gh attestation verify bluplai-buzz-chat-react-0\.1\.0-bluplai\.14\.tgz/u,
+    /gh attestation verify bluplai-buzz-chat-react-0\.1\.0-bluplai\.15\.tgz/u,
   );
   assert.match(
     documentation,
