@@ -74,6 +74,92 @@ export interface ChatTypingState {
   parentMessageId?: string | null;
 }
 
+export type ChatAgentRunState =
+  | "queued"
+  | "running"
+  | "publishing"
+  | "awaiting_approval"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "expired"
+  | "outcome_unknown";
+
+export type ChatAgentActionState =
+  | "pending"
+  | "executing"
+  | "completed"
+  | "denied"
+  | "expired"
+  | "failed"
+  | "outcome_unknown";
+
+export type ChatAgentJobState =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "outcome_unknown";
+
+export type ChatAgentPreview = Record<string, string | string[]>;
+
+interface ChatAgentOutputBase {
+  id: string;
+  replacementKey: string;
+  runId: string;
+  label: string;
+}
+
+export type ChatAgentOutput =
+  | (ChatAgentOutputBase & {
+      kind: "progress";
+      state:
+        | ChatAgentRunState
+        | "checking_context"
+        | "using_tools"
+        | "collaborating"
+        | "finalising"
+        | "inspecting_images";
+      canCancel: boolean;
+    })
+  | (ChatAgentOutputBase & {
+      kind: "approval";
+      actionId: string;
+      state: ChatAgentActionState;
+      preview: ChatAgentPreview;
+      canApprove: boolean;
+    })
+  | (ChatAgentOutputBase & {
+      kind: "job";
+      jobId: string;
+      state: ChatAgentJobState;
+      percent?: number | null;
+      canRetry: boolean;
+    })
+  | (ChatAgentOutputBase & {
+      kind: "failure";
+      recovery:
+        | "retry"
+        | "reconnect_connector"
+        | "refresh_access"
+        | "check_status"
+        | "contact_admin";
+    })
+  | (ChatAgentOutputBase & {
+      kind: "deep_link";
+      href: string;
+    })
+  | (ChatAgentOutputBase & {
+      kind: "connector_state";
+      state:
+        | "missing"
+        | "disabled"
+        | "authentication_required"
+        | "room_policy_denied";
+      recoveryHref?: "/admin/integrations";
+    });
+
 /** A browser-safe message projection supplied by a host transport. */
 export interface ChatMessage {
   id: string;
@@ -86,6 +172,8 @@ export interface ChatMessage {
   threadRootId?: string | null;
   reactions: ChatReaction[];
   attachments?: ChatAttachment[];
+  /** Trusted server-owned output items associated with this signed turn. */
+  agentOutputs?: ChatAgentOutput[];
   deliveryState?: "sending" | "sent" | "failed";
 }
 

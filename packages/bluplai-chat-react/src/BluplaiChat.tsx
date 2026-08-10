@@ -41,6 +41,11 @@ export interface BluplaiChatProps {
   searchGifs?: (query: string, signal: AbortSignal) => Promise<ChatGif[]>;
   /** Host-owned context shown between the room header and message history. */
   roomContext?: ReactNode;
+  /** Host-authorised agent actions; callbacks receive opaque IDs only. */
+  onApproveAction?: (actionId: string) => void;
+  onDenyAction?: (actionId: string) => void;
+  onCancelRun?: (runId: string) => void;
+  onRetryJob?: (jobId: string) => void;
   onNotificationPreferenceChange?: (
     room: ChatRoom,
     preference: "all" | "mentions" | "muted",
@@ -147,6 +152,10 @@ export function BluplaiChat({
   onManageMembers,
   searchGifs,
   roomContext,
+  onApproveAction,
+  onDenyAction,
+  onCancelRun,
+  onRetryJob,
   onNotificationPreferenceChange,
 }: BluplaiChatProps) {
   const retainedSnapshot = useMemo(
@@ -797,6 +806,10 @@ export function BluplaiChat({
                         ? undefined
                         : (item, emoji) => void react(item, emoji)
                     }
+                    onApproveAction={onApproveAction}
+                    onCancelRun={onCancelRun}
+                    onDenyAction={onDenyAction}
+                    onRetryJob={onRetryJob}
                     readState={projection.readState}
                     threadReplyCount={
                       projection.repliesByRoot.get(message.id)?.length ?? 0
@@ -928,6 +941,10 @@ export function BluplaiChat({
                     ...mentionProjects.map((project) => project.displayName),
                   ]}
                   readState={projection.readState}
+                  onApproveAction={onApproveAction}
+                  onCancelRun={onCancelRun}
+                  onDenyAction={onDenyAction}
+                  onRetryJob={onRetryJob}
                 />
                 {threadReplies.map((reply) => (
                   <MessageItem
@@ -939,6 +956,10 @@ export function BluplaiChat({
                       ...mentionProjects.map((project) => project.displayName),
                     ]}
                     readState={projection.readState}
+                    onApproveAction={onApproveAction}
+                    onCancelRun={onCancelRun}
+                    onDenyAction={onDenyAction}
+                    onRetryJob={onRetryJob}
                   />
                 ))}
                 {threadTyping.length ? (

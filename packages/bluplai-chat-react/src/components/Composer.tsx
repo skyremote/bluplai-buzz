@@ -1392,7 +1392,9 @@ export function Composer({
                     ? "Uploading…"
                     : item.status === "error"
                       ? item.error
-                      : formatBytes(item.file.size)}
+                      : item.file.type.startsWith("image/")
+                        ? `${formatBytes(item.file.size)} · Dale can inspect this image`
+                        : formatBytes(item.file.size)}
                 </small>
               </span>
               {item.status === "error" ? (

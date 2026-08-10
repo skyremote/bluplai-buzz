@@ -935,6 +935,114 @@
   width: 40px;
 }
 
+.bluplai-chat__agent-outputs {
+  display: grid;
+  gap: 8px;
+  margin-top: 9px;
+  max-width: 34rem;
+}
+
+.bluplai-chat__agent-card {
+  align-items: center;
+  background: var(--bluplai-chat-surface-subtle);
+  border: 1px solid var(--bluplai-chat-border);
+  border-radius: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+.bluplai-chat__agent-card strong {
+  flex: 1 1 12rem;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.bluplai-chat__agent-card button,
+.bluplai-chat__agent-card a,
+.bluplai-chat__agent-deep-link {
+  align-items: center;
+  border: 1px solid var(--bluplai-chat-border);
+  border-radius: 8px;
+  color: var(--bluplai-chat-text);
+  display: inline-flex;
+  font: inherit;
+  font-weight: 650;
+  justify-content: center;
+  min-height: 40px;
+  padding: 7px 10px;
+  text-decoration: none;
+}
+
+.bluplai-chat__agent-card button:first-child,
+.bluplai-chat__agent-deep-link {
+  background: var(--bluplai-chat-accent);
+  border-color: var(--bluplai-chat-accent);
+  color: white;
+}
+
+.bluplai-chat__agent-card-actions {
+  display: flex;
+  gap: 7px;
+}
+
+.bluplai-chat__agent-preview {
+  display: grid;
+  flex: 1 0 100%;
+  gap: 5px;
+  margin: 0;
+}
+
+.bluplai-chat__agent-preview > div {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(4.5rem, auto) minmax(0, 1fr);
+}
+
+.bluplai-chat__agent-preview dt,
+.bluplai-chat__agent-preview dd {
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.bluplai-chat__agent-preview dt,
+.bluplai-chat__agent-state {
+  color: var(--bluplai-chat-muted);
+}
+
+.bluplai-chat__agent-progress {
+  background: var(--bluplai-chat-border);
+  border-radius: 999px;
+  flex: 1 0 100%;
+  height: 6px;
+  overflow: hidden;
+}
+
+.bluplai-chat__agent-progress > span {
+  background: var(--bluplai-chat-accent);
+  display: block;
+  height: 100%;
+  transition: width 180ms ease-out;
+}
+
+.bluplai-chat__agent-pulse {
+  animation: bluplai-chat-agent-pulse 1.3s ease-in-out infinite;
+  background: var(--bluplai-chat-accent);
+  border-radius: 50%;
+  height: 8px;
+  width: 8px;
+}
+
+@keyframes bluplai-chat-agent-pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+}
+
 .bluplai-chat__composer {
   flex: 0 0 auto;
   margin: 0;
@@ -1885,15 +1993,28 @@
   }
 
   .bluplai-chat__message-reactions button,
-  .bluplai-chat__message-hover-actions button {
-    min-height: 42px;
-    min-width: 42px;
+  .bluplai-chat__message-hover-actions button,
+  .bluplai-chat__agent-card button,
+  .bluplai-chat__agent-card a,
+  .bluplai-chat__agent-deep-link {
+    min-height: 44px;
+    min-width: 44px;
   }
 
   .bluplai-chat__thread-panel > header button,
   .bluplai-chat__search-panel > header button {
     height: 42px;
     width: 42px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bluplai-chat__agent-pulse {
+    animation: none;
+  }
+
+  .bluplai-chat__agent-progress > span {
+    transition: none;
   }
 }
 
