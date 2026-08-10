@@ -20,7 +20,12 @@ export interface GatewayConnectionOptions {
 }
 
 type GatewayFrame =
-  | { type: "authenticated"; read_only: boolean; history_boundary: number }
+  | {
+      type: "authenticated";
+      read_only: boolean;
+      history_boundary: number;
+      capabilities?: unknown;
+    }
   | {
       type: "accepted";
       result: Record<string, unknown>;
@@ -179,6 +184,12 @@ export class BuzzGatewaySession {
           this.sessionCapabilities = Object.freeze({
             schemaVersion: 1,
             readOnly: frame.read_only,
+            huddleStart:
+              Array.isArray(frame.capabilities) &&
+              frame.capabilities.every(
+                (capability) => typeof capability === "string",
+              ) &&
+              frame.capabilities.includes("huddle.start"),
           });
           this.options.onState?.("connected");
           if (this.options.roomIds.length > 0) {

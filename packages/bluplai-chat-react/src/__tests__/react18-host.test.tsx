@@ -1133,7 +1133,6 @@ describe("capability command boundary", () => {
     "workflow.run",
     "project.open",
     "canvas.open",
-    "huddle.start",
     "acp.launch-agent",
   ] as const)("rejects hidden %s commands before transport", async (type) => {
     const { commands, transport } = createTransport();
@@ -1142,6 +1141,35 @@ describe("capability command boundary", () => {
       executeChatCommand(transport, { type }, workspace.capabilities),
     ).rejects.toBeInstanceOf(CapabilityDeniedError);
     expect(commands).toEqual([]);
+  });
+
+  it("permits only huddle.start when its authenticated capability is exact", async () => {
+    const { commands, transport } = createTransport();
+    const command: ChatCommand = {
+      type: "huddle.start",
+      source: { roomId: "room-general", threadRootEventId: null },
+      mode: "orchestrated",
+      recordingRequested: false,
+      retentionDays: 365,
+      participants: [],
+      correlationId: "correlation-1",
+    };
+
+    await expect(
+      executeChatCommand(transport, command, {
+        schemaVersion: 1,
+        readOnly: false,
+        huddleStart: false,
+      }),
+    ).rejects.toBeInstanceOf(CapabilityDeniedError);
+    await expect(
+      executeChatCommand(transport, command, {
+        schemaVersion: 1,
+        readOnly: false,
+        huddleStart: true,
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(commands).toEqual([command]);
   });
 
   it("passes browser chat commands through the same guarded entry point", async () => {

@@ -131,10 +131,67 @@ describe("managed browser gateway", () => {
     await expect(connecting).resolves.toEqual({
       schemaVersion: 1,
       readOnly: false,
+      huddleStart: false,
     });
     expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([
       { type: "authenticate", ticket: "bzt_empty" },
     ]);
+  });
+
+  it("opens only the exact huddle.start capability advertised by the host", async () => {
+    FakeWebSocket.instances = [];
+    const session = new BuzzGatewaySession({
+      url: "wss://gateway.example.test/buzz-chat/ws",
+      ticket: "bzt_huddles",
+      roomIds: [],
+      onEvent: vi.fn(),
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    });
+    const connecting = session.connect();
+    const socket = FakeWebSocket.instances[0];
+    if (!socket) throw new Error("gateway socket was not constructed");
+    socket.open();
+    socket.receive({
+      type: "authenticated",
+      read_only: false,
+      history_boundary: 1_786_000_123,
+      capabilities: ["huddle.start", "huddle.end", "unknown.future"],
+    });
+
+    await expect(connecting).resolves.toEqual({
+      schemaVersion: 1,
+      readOnly: false,
+      huddleStart: true,
+    });
+  });
+
+  it("keeps Huddles fail-closed when the host omits or malforms capabilities", async () => {
+    for (const capabilities of [undefined, ["huddle.end"], "huddle.start"]) {
+      FakeWebSocket.instances = [];
+      const session = new BuzzGatewaySession({
+        url: "wss://gateway.example.test/buzz-chat/ws",
+        ticket: "bzt_no_huddles",
+        roomIds: [],
+        onEvent: vi.fn(),
+        WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+      });
+      const connecting = session.connect();
+      const socket = FakeWebSocket.instances[0];
+      if (!socket) throw new Error("gateway socket was not constructed");
+      socket.open();
+      socket.receive({
+        type: "authenticated",
+        read_only: false,
+        history_boundary: 1_786_000_123,
+        ...(capabilities === undefined ? {} : { capabilities }),
+      });
+
+      await expect(connecting).resolves.toEqual({
+        schemaVersion: 1,
+        readOnly: false,
+        huddleStart: false,
+      });
+    }
   });
 
   it("publishes only bounded presence and typing commands", async () => {
@@ -396,6 +453,7 @@ describe("managed browser gateway", () => {
     await expect(connecting).resolves.toEqual({
       schemaVersion: 1,
       readOnly: true,
+      huddleStart: false,
     });
     const sentBeforeWrite = socket.sent.length;
     const history = session.history("room-1", null, 10);
