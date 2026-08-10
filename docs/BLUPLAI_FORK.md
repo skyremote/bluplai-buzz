@@ -42,23 +42,74 @@ pnpm --filter @bluplai/buzz-chat-react test
 pnpm --filter @bluplai/buzz-chat-react build
 ```
 
-The compatibility workflow packs the built package and uploads an artifact
-named with the full fork SHA. It records the upstream SHA, fork SHA, audited
-merge SHA and both merge parents, package version and tarball SHA-256. It uses
-full Git history to prove `UPSTREAM_BASE` is the audited merge's second parent
-and an ancestor of the candidate. Registry publication, if enabled later, must
-use an immutable prerelease version containing the fork commit and must be an
-explicit release action rather than a branch-push side effect.
+The compatibility workflow packs the built package twice, with the Hermit-pinned
+Node/npm toolchain and `npm pack` run from the package directory. It rejects
+non-identical archives, uploads one candidate named with the full fork SHA, and
+records the upstream SHA, fork SHA, audited merge SHA and both merge parents,
+package version and tarball SHA-256. It uses full Git history to prove
+`UPSTREAM_BASE` is the audited merge's second parent and an ancestor of the
+candidate. Registry publication, if enabled later, must use an immutable
+prerelease version containing the fork commit and must be an explicit release
+action rather than a branch-push side effect.
 
-The host repository is private while this fork is public. Candidate and pull
-request workflows never receive a private-host credential or checkout. After
-a successful push to `main`, the trusted default-branch
-`bluplai-host-compatibility.yml` workflow downloads the immutable artifact by
-workflow-run ID, verifies its hash and full merge-parent chain, then checks out
-the host with a fine-grained read-only `BLUPLAI_HOST_READ_TOKEN`. Checkout uses
-`persist-credentials: false`, so candidate package code runs without that
-credential. A missing or expired token is a release blocker, not permission to
-bypass the host gate.
+The host repository is private while this fork is public. No workflow in this
+public repository receives a private-host credential or checks out the host.
+Pull-request checks remain read-only and unprivileged. Host compatibility runs
+from the private host repository after it has independently pinned the exact
+tarball hash; its result is a separate release gate and cannot be inferred from
+this public package build.
+
+The immutable facts for the current package are checked in at
+`.github/bluplai-package-release.json`. A push of those facts to `main` runs
+`bluplai-package-attestation.yml`, reconstructs the exact package source in a
+clean detached worktree, proves the audited merge-parent and upstream ancestry,
+builds and tests, packs twice, verifies SHA-256, and asks GitHub to attest both
+the tarball and checked-in manifest. The attestation job has only `contents:
+read`, `id-token: write`, and `attestations: write`; it has no registry,
+deployment, host, or repository-write authority.
+
+**Current attestation status (2026-08-10): blocked.** The manifest and workflow
+are on the review branch, not `main`, so GitHub has not produced an attestation
+for `@bluplai/buzz-chat-react@0.1.0-bluplai.13`. Do not describe the archive as
+attested until the reviewed commit lands on `main` and the main-only workflow
+succeeds. This status does not authorize pushing, merging, publishing, or
+deploying the package.
+
+Release landing must preserve the package-source commit named by the manifest
+as an ancestor of `main`; the attestation workflow enforces that relationship
+with `git merge-base --is-ancestor`. **Do not squash, rebase, or cherry-pick**
+the audited package and release commits when landing them. Use an
+ancestry-preserving merge or fast-forward. Rewritten history is a hard release
+failure even when its final files happen to be byte-identical.
+
+After the main-only workflow succeeds, copy the exact 40-character
+`GITHUB_SHA` from that landed `main` run into `<LANDED_MAIN_SHA>`. Verify both
+downloaded subjects against GitHub's live attestation service before any host
+upload or installation. The source digest and signer-workflow digest must both
+equal that landed commit; `refs/heads/main` alone is mutable and insufficient.
+
+```bash
+gh attestation verify bluplai-buzz-chat-react-0.1.0-bluplai.13.tgz \
+  --repo skyremote/bluplai-buzz \
+  --signer-workflow skyremote/bluplai-buzz/.github/workflows/bluplai-package-attestation.yml \
+  --source-ref refs/heads/main \
+  --source-digest <LANDED_MAIN_SHA> \
+  --signer-digest <LANDED_MAIN_SHA>
+
+gh attestation verify .github/bluplai-package-release.json \
+  --repo skyremote/bluplai-buzz \
+  --signer-workflow skyremote/bluplai-buzz/.github/workflows/bluplai-package-attestation.yml \
+  --source-ref refs/heads/main \
+  --source-digest <LANDED_MAIN_SHA> \
+  --signer-digest <LANDED_MAIN_SHA>
+```
+
+A local checksum, workflow summary, or uploaded Actions artifact is not a
+substitute for these live verifications. Host upload is prohibited until both
+live verifications succeed against the same exact landed builder/source SHA and
+signer workflow. The checked-in helper
+`scripts/verify-bluplai-live-attestations.mjs` runs both fail-closed checks when
+given `--landed-main-sha`, `--tarball`, and `--manifest`.
 
 ## Human-reviewed upstream sync
 
@@ -70,13 +121,16 @@ bypass the host gate.
 3. Updates `UPSTREAM_BASE` within the proposed merge commit.
 4. Runs the browser compatibility gate plus upstream `just check` and
    `just test-unit` gates.
-5. Packs and hashes the exact browser archive with its explicit merge-parent
-   chain; no private-host credential is available in this candidate workflow.
+5. Packs the exact browser archive twice with pinned `npm pack`, rejects any
+   byte difference, and records its explicit merge-parent chain and hash; no
+   private-host credential is available in this candidate workflow.
 6. Pushes the branch and opens a **draft** pull request.
 
 After reviewed merge, the compatibility workflow emits a new immutable
-main-branch artifact and the trusted post-merge host workflow runs the private
-host contract tests and production build.
+main-branch candidate. The main-only attestation workflow will attest only a
+release whose checked-in manifest, package tree, ancestry, toolchain and archive
+hash all match. Private-host contract tests and the production build remain an
+independent gate owned by the private host repository.
 
 The workflow contains no deployment, image publication, package publication,
 or automatic merge step. A maintainer must review the incoming commits, the
@@ -96,9 +150,9 @@ The current `UPSTREAM_BASE` advances from
 `5bf78671f45178f8de02ba18d3d321cbbf19cd1f`, reconciling 151 upstream commits
 against 19 fork commits. `docs/UPSTREAM_ADOPTION.md` is the exhaustive
 Adopt/Adapt/Exclude ledger and records the three conflict resolutions. The
-accepted release chain is commit- and archive-addressed in the Bluplai host's
-`internal-docs/releases/buzz-package-provenance.json`; the workflow rejects a
-release candidate when that record does not match.
+public package release facts are commit-, tree-, and archive-addressed in
+`.github/bluplai-package-release.json`; the private host must independently pin
+the same archive identity before release.
 
 ### Recorded 2026-08-03 sync rehearsal
 

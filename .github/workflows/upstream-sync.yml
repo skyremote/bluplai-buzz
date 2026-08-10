@@ -29,6 +29,11 @@ jobs:
           ref: main
       - name: Activate pinned toolchain
         uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      - name: Verify pinned package toolchain
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(npm --version)" = "11.12.1"
+          test "$(pnpm --version)" = "11.4.0"
       - name: Prepare merge and delta report
         id: prepare
         env:
@@ -111,26 +116,32 @@ jobs:
         run: |
           just check
           just test-unit
-      - name: Pack and attest candidate
+      - name: Reproducibly pack candidate
         if: steps.prepare.outputs.changed == 'true'
         id: candidate
         shell: bash
+        working-directory: packages/bluplai-chat-react
         run: |
           set -euo pipefail
-          package_dir="$RUNNER_TEMP/bluplai-chat-package"
-          mkdir -p "$package_dir"
-          pnpm --filter @bluplai/buzz-chat-react pack --pack-destination "$package_dir"
-          tarball="$(find "$package_dir" -maxdepth 1 -type f -name '*.tgz' -print -quit)"
-          test -n "$tarball"
+          first_dir="$RUNNER_TEMP/bluplai-chat-package-first"
+          second_dir="$RUNNER_TEMP/bluplai-chat-package-second"
+          mkdir -p "$first_dir" "$second_dir"
+          npm pack --pack-destination "$first_dir"
+          npm pack --pack-destination "$second_dir"
+          first_tarball="$first_dir/$(node -p "const p=require('./package.json'); p.name.replace('@','').replace('/','-')+'-'+p.version+'.tgz'")"
+          second_tarball="$second_dir/$(basename "$first_tarball")"
+          test -f "$first_tarball"
+          test -f "$second_tarball"
+          cmp "$first_tarball" "$second_tarball"
 
-          upstream_sha="$(tr -d '[:space:]' < UPSTREAM_BASE)"
-          fork_sha="$(git rev-parse HEAD)"
-          first_parent_sha="$(git rev-parse HEAD^1)"
-          second_parent_sha="$(git rev-parse HEAD^2)"
+          upstream_sha="$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/UPSTREAM_BASE")"
+          fork_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+          first_parent_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD^1)"
+          second_parent_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD^2)"
           test "$second_parent_sha" = "$upstream_sha"
-          git merge-base --is-ancestor "$upstream_sha" "$fork_sha"
-          package_version="$(node -p "require('./packages/bluplai-chat-react/package.json').version")"
-          tarball_sha256="$(sha256sum "$tarball" | awk '{print $1}')"
+          git -C "$GITHUB_WORKSPACE" merge-base --is-ancestor "$upstream_sha" "$fork_sha"
+          package_version="$(node -p "require('./package.json').version")"
+          tarball_sha256="$(sha256sum "$first_tarball" | awk '{print $1}')"
 
           jq -n \
             --arg upstream_sha "$upstream_sha" \
@@ -138,7 +149,7 @@ jobs:
             --arg first_parent_sha "$first_parent_sha" \
             --arg second_parent_sha "$second_parent_sha" \
             --arg package_version "$package_version" \
-            --arg tarball "$(basename "$tarball")" \
+            --arg tarball "$(basename "$first_tarball")" \
             --arg tarball_sha256 "$tarball_sha256" \
             '{
               schema_version: 1,
@@ -168,7 +179,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "fork_sha=$fork_sha" >> "$GITHUB_OUTPUT"
-          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          echo "tarball=$first_tarball" >> "$GITHUB_OUTPUT"
       - name: Upload delta report
         if: always() && steps.prepare.outputs.changed == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

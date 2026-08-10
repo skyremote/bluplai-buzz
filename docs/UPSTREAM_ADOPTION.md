@@ -100,14 +100,31 @@ The merge had three textual conflicts:
 
 The package candidate is not identified by a branch or mutable tag. Candidate
 CI records the upstream SHA, fork SHA, audited merge SHA and both merge parents,
-package version and tarball SHA-256, then uploads the tarball with its
-attestation. Only the trusted post-merge `workflow_run` gate may use the
-private-host read token. It downloads the immutable artifact from the exact
-successful main-branch run, verifies its history and hash, installs it into a
-clean `skyremote/bluplai-david` checkout, and runs the host contracts and
-production build. The gate additionally requires
-`internal-docs/releases/buzz-package-provenance.json` in the host checkout to
-match the candidate and say `accepted`.
+package version and tarball SHA-256. Packing runs twice from the package
+directory with the pinned npm toolchain and the workflow rejects non-identical
+archives.
+
+The public repository contains no private-host checkout or token. Its
+main-only package-attestation workflow verifies the immutable facts in
+`.github/bluplai-package-release.json`, reconstructs the named package source
+in a clean detached worktree, proves the complete audited ancestry, repeats the
+package gates, verifies the reproducible archive hash, and requests GitHub
+artifact attestations for both the tarball and manifest. Private-host tests and
+acceptance remain a separate, independently authenticated host-repository gate.
+
+As of 2026-08-10 the attestation is blocked because this workflow and manifest
+have not landed on `main`. A branch artifact or a locally matching SHA-256 is
+not a GitHub attestation and must not be represented as one.
+
+Landing must preserve the manifest's package-source commit as an ancestor of
+`main`; squash, rebase, and cherry-pick landing are prohibited for this release.
+Before any host upload or installation, the private release gate must verify
+both the tarball and co-attested `.github/bluplai-package-release.json` against
+the live GitHub service. Both commands must pin `--source-digest
+<LANDED_MAIN_SHA>` and `--signer-digest <LANDED_MAIN_SHA>` alongside the exact
+signer workflow and `--source-ref refs/heads/main`. A mutable branch ref alone
+is insufficient; host upload stays prohibited when either subject or either
+exact digest identity is missing, mismatched, or unverifiable.
 
 No sync workflow deploys, publishes a registry package or weakens Bluplai's
 organization, gateway, package, rollout or compatibility boundaries.

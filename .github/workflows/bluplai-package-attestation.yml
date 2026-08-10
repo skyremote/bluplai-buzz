@@ -1,0 +1,155 @@
+name: Bluplai package release attestation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/bluplai-package-release.json"
+      - ".github/workflows/bluplai-package-attestation.yml"
+      - ".github/workflows/bluplai-compatibility.yml"
+      - "UPSTREAM_BASE"
+      - "packages/bluplai-chat-react/**"
+      - "pnpm-lock.yaml"
+      - "scripts/test-bluplai-package-release-contract.mjs"
+      - "scripts/verify-bluplai-live-attestations.mjs"
+      - "scripts/verify-bluplai-package-release.mjs"
+
+concurrency:
+  group: bluplai-package-attestation-${{ github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  attest-package:
+    name: Attest immutable browser package
+    if: github.repository == 'skyremote/bluplai-buzz' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact main source and full history
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Activate pinned toolchain
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      - name: Verify workflow and toolchain contracts
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "v24.15.0"
+          test "$(npm --version)" = "11.12.1"
+          test "$(pnpm --version)" = "11.4.0"
+          node --test scripts/test-bluplai-package-release-contract.mjs
+      - name: Prove immutable source and audited ancestry
+        id: source
+        shell: bash
+        env:
+          RELEASE_MANIFEST: ${{ github.workspace }}/.github/bluplai-package-release.json
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          package_path="$(jq -er '.source.package_path' "$RELEASE_MANIFEST")"
+          package_commit="$(jq -er '.source.package_commit' "$RELEASE_MANIFEST")"
+          package_tree="$(jq -er '.source.package_tree' "$RELEASE_MANIFEST")"
+          upstream_commit="$(jq -er '.source.upstream_commit' "$RELEASE_MANIFEST")"
+          audited_merge_commit="$(jq -er '.source.audited_merge_commit' "$RELEASE_MANIFEST")"
+          first_parent="$(jq -er '.source.audited_merge_first_parent' "$RELEASE_MANIFEST")"
+          second_parent="$(jq -er '.source.audited_merge_second_parent' "$RELEASE_MANIFEST")"
+
+          test "$(tr -d '[:space:]' < UPSTREAM_BASE)" = "$upstream_commit"
+          test "$(git rev-parse "${package_commit}:${package_path}")" = "$package_tree"
+          test "$(git rev-parse "HEAD:${package_path}")" = "$package_tree"
+          test "$(git rev-parse "${audited_merge_commit}^1")" = "$first_parent"
+          test "$(git rev-parse "${audited_merge_commit}^2")" = "$second_parent"
+          test "$second_parent" = "$upstream_commit"
+          test "$(git show "${audited_merge_commit}:UPSTREAM_BASE" | tr -d '[:space:]')" = "$upstream_commit"
+          git merge-base --is-ancestor "$upstream_commit" "$audited_merge_commit"
+          git merge-base --is-ancestor "$audited_merge_commit" "$package_commit"
+          git merge-base --is-ancestor "$package_commit" HEAD
+
+          package_source="$RUNNER_TEMP/bluplai-package-source"
+          git worktree add --detach "$package_source" "$package_commit"
+          test -z "$(git -C "$package_source" status --porcelain --untracked-files=all)"
+          test "$(git -C "$package_source" rev-parse "HEAD:${package_path}")" = "$package_tree"
+
+          echo "package_path=$package_path" >> "$GITHUB_OUTPUT"
+          echo "package_source=$package_source" >> "$GITHUB_OUTPUT"
+      - name: Install exact package-source workspace
+        working-directory: ${{ steps.source.outputs.package_source }}
+        run: pnpm install --frozen-lockfile
+      - name: Check package boundaries and tests
+        working-directory: ${{ steps.source.outputs.package_source }}
+        run: |
+          pnpm --filter @bluplai/buzz-chat-react check
+          pnpm --filter @bluplai/buzz-chat-react test
+      - name: Build exact package
+        working-directory: ${{ steps.source.outputs.package_source }}
+        run: pnpm --filter @bluplai/buzz-chat-react build
+      - name: Reproducibly pack and verify release hash
+        id: release
+        shell: bash
+        working-directory: ${{ steps.source.outputs.package_source }}/packages/bluplai-chat-react
+        env:
+          RELEASE_MANIFEST: ${{ github.workspace }}/.github/bluplai-package-release.json
+        run: |
+          set -euo pipefail
+          first_dir="$RUNNER_TEMP/bluplai-chat-package-first"
+          second_dir="$RUNNER_TEMP/bluplai-chat-package-second"
+          mkdir -p "$first_dir" "$second_dir"
+          npm pack --pack-destination "$first_dir"
+          npm pack --pack-destination "$second_dir"
+          filename="$(jq -er '.package.filename' "$RELEASE_MANIFEST")"
+          first_tarball="$first_dir/$filename"
+          second_tarball="$second_dir/$filename"
+          test -f "$first_tarball"
+          test -f "$second_tarball"
+          cmp "$first_tarball" "$second_tarball"
+
+          test "$(node -p "require('./package.json').name")" = "$(jq -er '.package.name' "$RELEASE_MANIFEST")"
+          test "$(node -p "require('./package.json').version")" = "$(jq -er '.package.version' "$RELEASE_MANIFEST")"
+          actual_sha256="$(sha256sum "$first_tarball" | awk '{print $1}')"
+          expected_sha256="$(jq -er '.package.sha256' "$RELEASE_MANIFEST")"
+          test "$actual_sha256" = "$expected_sha256"
+          node "$GITHUB_WORKSPACE/scripts/verify-bluplai-package-release.mjs" \
+            --manifest "$RELEASE_MANIFEST" \
+            --repository "${{ steps.source.outputs.package_source }}" \
+            --tarball "$first_tarball"
+
+          package_source="${{ steps.source.outputs.package_source }}"
+          test -z "$(git -C "$package_source" status --porcelain --untracked-files=all)"
+          echo "tarball=$first_tarball" >> "$GITHUB_OUTPUT"
+          echo "sha256=$actual_sha256" >> "$GITHUB_OUTPUT"
+      - name: Attest tarball and immutable release manifest
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            ${{ steps.release.outputs.tarball }}
+            .github/bluplai-package-release.json
+      - name: Upload attested release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: bluplai-buzz-chat-react-${{ github.sha }}
+          path: |
+            ${{ steps.release.outputs.tarball }}
+            .github/bluplai-package-release.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Record immutable release identity
+        env:
+          TARBALL_SHA256: ${{ steps.release.outputs.sha256 }}
+        run: |
+          {
+            echo "### Attested Bluplai browser package"
+            echo
+            echo "- Main commit: \`$GITHUB_SHA\`"
+            echo "- Package source: \`$(jq -r '.source.package_commit' .github/bluplai-package-release.json)\`"
+            echo "- Package version: \`$(jq -r '.package.version' .github/bluplai-package-release.json)\`"
+            echo "- Tarball SHA-256: \`$TARBALL_SHA256\`"
+          } >> "$GITHUB_STEP_SUMMARY"
