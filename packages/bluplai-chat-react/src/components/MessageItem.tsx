@@ -1,4 +1,8 @@
-import type { ChatMessage, ChatReadState } from "../transport/types";
+import type {
+  ChatAgentOutput,
+  ChatMessage,
+  ChatReadState,
+} from "../transport/types";
 import { ChatIcon } from "./ChatIcon";
 import { MessageContent } from "./MessageContent";
 
@@ -20,24 +24,217 @@ function reactionLabel(
   return `${emoji} reaction, ${people}${viewer}`;
 }
 
+const UUID =
+  "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+const INTERNAL_LINKS = [
+  new RegExp(`^/notes\\?note=${UUID}(?:&proposal=${UUID})?$`, "i"),
+  new RegExp(`^/documents\\?focus=${UUID}$`, "i"),
+  new RegExp(`^/whiteboards/${UUID}$`, "i"),
+  new RegExp(`^/projects/${UUID}/artifacts/${UUID}$`, "i"),
+];
+
+function safeInternalHref(href: string): boolean {
+  const hasControl = [...href].some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127;
+  });
+  return (
+    !href.includes("\\") &&
+    !hasControl &&
+    !href.includes("%") &&
+    !href.includes("#") &&
+    INTERNAL_LINKS.some((pattern) => pattern.test(href))
+  );
+}
+
+function latestOutputs(
+  items: ChatAgentOutput[] | undefined,
+): ChatAgentOutput[] {
+  const byReplacement = new Map<string, ChatAgentOutput>();
+  for (const item of items ?? []) byReplacement.set(item.replacementKey, item);
+  return [...byReplacement.values()];
+}
+
+function AgentOutputCard({
+  item,
+  onApproveAction,
+  onDenyAction,
+  onCancelRun,
+  onRetryJob,
+}: {
+  item: ChatAgentOutput;
+  onApproveAction?: (actionId: string) => void;
+  onDenyAction?: (actionId: string) => void;
+  onCancelRun?: (runId: string) => void;
+  onRetryJob?: (jobId: string) => void;
+}) {
+  if (item.kind === "progress") {
+    return (
+      <section
+        aria-live="polite"
+        className="bluplai-chat__agent-card"
+        data-kind="progress"
+      >
+        <span className="bluplai-chat__agent-pulse" aria-hidden="true" />
+        <strong>{item.label}</strong>
+        {item.canCancel && onCancelRun ? (
+          <button
+            aria-label={`Stop ${item.label}`}
+            onClick={() => onCancelRun(item.runId)}
+            type="button"
+          >
+            Stop
+          </button>
+        ) : null}
+      </section>
+    );
+  }
+  if (item.kind === "approval") {
+    return (
+      <section
+        aria-label={`${item.label} approval`}
+        className="bluplai-chat__agent-card"
+        data-kind="approval"
+      >
+        <strong>{item.label}</strong>
+        {Object.entries(item.preview).length ? (
+          <dl className="bluplai-chat__agent-preview">
+            {Object.entries(item.preview).map(([name, value]) => (
+              <div key={name}>
+                <dt>{name}</dt>
+                <dd>{Array.isArray(value) ? value.join(", ") : value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+        {item.state === "pending" && item.canApprove ? (
+          <div className="bluplai-chat__agent-card-actions">
+            {onApproveAction ? (
+              <button
+                aria-label={`Approve ${item.label}`}
+                onClick={() => onApproveAction(item.actionId)}
+                type="button"
+              >
+                Approve
+              </button>
+            ) : null}
+            {onDenyAction ? (
+              <button
+                aria-label={`Deny ${item.label}`}
+                onClick={() => onDenyAction(item.actionId)}
+                type="button"
+              >
+                Deny
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <span className="bluplai-chat__agent-state">
+            {item.state.replaceAll("_", " ")}
+          </span>
+        )}
+      </section>
+    );
+  }
+  if (item.kind === "job") {
+    const percent = Math.max(0, Math.min(100, item.percent ?? 0));
+    return (
+      <section className="bluplai-chat__agent-card" data-kind="job">
+        <strong>{item.label}</strong>
+        {item.state === "queued" || item.state === "running" ? (
+          <>
+            <div
+              aria-label={`${item.label} progress`}
+              aria-valuemax={100}
+              aria-valuemin={0}
+              aria-valuenow={percent}
+              className="bluplai-chat__agent-progress"
+              role="progressbar"
+            >
+              <span style={{ width: `${percent}%` }} />
+            </div>
+            <small>{percent}%</small>
+          </>
+        ) : (
+          <>
+            <span className="bluplai-chat__agent-state">
+              {item.state.replaceAll("_", " ")}
+            </span>
+            {item.canRetry && onRetryJob ? (
+              <button
+                aria-label={`Retry ${item.label}`}
+                onClick={() => onRetryJob(item.jobId)}
+                type="button"
+              >
+                Retry
+              </button>
+            ) : null}
+          </>
+        )}
+      </section>
+    );
+  }
+  if (item.kind === "deep_link") {
+    return safeInternalHref(item.href) ? (
+      <a className="bluplai-chat__agent-deep-link" href={item.href}>
+        {item.label}
+      </a>
+    ) : null;
+  }
+  if (item.kind === "connector_state") {
+    return (
+      <section
+        className="bluplai-chat__agent-card"
+        data-kind="connector_state"
+        role="status"
+      >
+        <strong>{item.label}</strong>
+        <span>{item.state.replaceAll("_", " ")}</span>
+        {item.recoveryHref ? (
+          <a href={item.recoveryHref}>Open integrations</a>
+        ) : null}
+      </section>
+    );
+  }
+  return (
+    <section
+      className="bluplai-chat__agent-card"
+      data-kind="failure"
+      role="alert"
+    >
+      <strong>{item.label}</strong>
+    </section>
+  );
+}
+
 export interface MessageItemProps {
   message: ChatMessage;
   readState?: ChatReadState;
   compact?: boolean;
+  deepLinkTarget?: boolean;
   threadReplyCount?: number;
   mentionNames?: string[];
   onReact?: (message: ChatMessage, emoji: string) => void;
   onOpenThread?: (message: ChatMessage) => void;
+  onApproveAction?: (actionId: string) => void;
+  onDenyAction?: (actionId: string) => void;
+  onCancelRun?: (runId: string) => void;
+  onRetryJob?: (jobId: string) => void;
 }
 
 export function MessageItem({
   message,
   readState,
   compact,
+  deepLinkTarget = false,
   threadReplyCount = 0,
   mentionNames,
   onReact,
   onOpenThread,
+  onApproveAction,
+  onDenyAction,
+  onCancelRun,
+  onRetryJob,
 }: MessageItemProps) {
   const read = isMessageRead(message, readState);
   const initials = message.author.displayName
@@ -58,6 +255,9 @@ export function MessageItem({
       ]
         .filter(Boolean)
         .join(" ")}
+      data-deep-link-target={deepLinkTarget || undefined}
+      data-message-id={message.id}
+      tabIndex={deepLinkTarget ? -1 : undefined}
     >
       <div className="bluplai-chat__avatar" aria-hidden="true">
         {message.author.avatarUrl ? (
@@ -89,6 +289,20 @@ export function MessageItem({
           ) : null}
         </header>
         <MessageContent body={message.body} mentionNames={mentionNames} />
+        {message.agentOutputs?.length ? (
+          <div className="bluplai-chat__agent-outputs">
+            {latestOutputs(message.agentOutputs).map((item) => (
+              <AgentOutputCard
+                item={item}
+                key={item.replacementKey}
+                onApproveAction={onApproveAction}
+                onCancelRun={onCancelRun}
+                onDenyAction={onDenyAction}
+                onRetryJob={onRetryJob}
+              />
+            ))}
+          </div>
+        ) : null}
         {message.attachments?.length ? (
           <div className="bluplai-chat__attachments">
             {message.attachments.map((attachment) => (

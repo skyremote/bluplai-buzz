@@ -2,6 +2,15 @@ import "./styles.css";
 
 export { BluplaiChat, type BluplaiChatProps } from "./BluplaiChat";
 export {
+  HuddleControls,
+  type HuddleControlsProps,
+} from "./huddles/HuddleControls";
+export { HuddlePanel, type HuddlePanelProps } from "./huddles/HuddlePanel";
+export {
+  HuddleTranscript,
+  type HuddleTranscriptProps,
+} from "./huddles/HuddleTranscript";
+export {
   BLUPLAI_CHAT_CAPABILITIES,
   READ_ONLY_CHAT_CAPABILITIES,
   CapabilityDeniedError,
@@ -26,6 +35,11 @@ export type {
   BuzzChatTransport,
   ChatAttachment,
   ChatAttachmentReference,
+  ChatAgentActionState,
+  ChatAgentJobState,
+  ChatAgentOutput,
+  ChatAgentPreview,
+  ChatAgentRunState,
   ChatAuthor,
   ChatCommand,
   ChatCommandResult,
@@ -42,5 +56,26 @@ export type {
   ChatWorkspaceSnapshot,
   ChatWorkspaceCapabilities,
   HiddenSurfaceCommand,
+  HuddleConnectionState,
+  HuddleConsentState,
+  HuddleCredential,
+  HuddleId,
+  HuddleJoinRequest,
+  HuddleJoinResult,
+  HuddleLifecycle,
+  HuddleLifecycleState,
+  HuddleOperationOptions,
+  HuddleOutputKind,
+  HuddleOutputReference,
+  HuddleParticipant,
+  HuddleParticipantState,
+  HuddleProgress,
+  HuddleProgressState,
+  HuddleRecordingState,
+  HuddleSnapshot,
+  HuddleSource,
+  HuddleStartRequest,
+  HuddleTranscriptTurn,
+  HuddleTransport,
   LoadWorkspaceOptions,
 } from "./transport/types";

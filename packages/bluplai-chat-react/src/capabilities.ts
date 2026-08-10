@@ -21,18 +21,19 @@ export const BLUPLAI_CHAT_CAPABILITIES = Object.freeze({
   workflows: false,
   projects: false,
   canvas: false,
-  huddles: false,
+  huddles: true,
   acp: false,
 });
 
 /** Fail-closed state used until an authenticated gateway frame grants writes. */
 export const READ_ONLY_CHAT_CAPABILITIES: ChatWorkspaceCapabilities =
-  Object.freeze({ schemaVersion: 1, readOnly: true });
+  Object.freeze({ schemaVersion: 1, readOnly: true, huddleStart: false });
 
 const ALLOWED_COMMAND_TYPES = new Set<AllowedChatCommand["type"]>([
   "chat.send-message",
   "chat.add-reaction",
   "chat.mark-read",
+  "huddle.start",
 ]);
 
 const COMMAND_SURFACES: Record<string, string> = {
@@ -76,6 +77,9 @@ export async function executeChatCommand(
   capabilities: ChatWorkspaceCapabilities,
 ): Promise<ChatCommandResult> {
   if (!isAllowedChatCommand(command)) {
+    throw new CapabilityDeniedError(command.type);
+  }
+  if (command.type === "huddle.start" && capabilities.huddleStart !== true) {
     throw new CapabilityDeniedError(command.type);
   }
   if (capabilities.readOnly) throw new ReadOnlySessionError();

@@ -313,6 +313,44 @@ describe("React 18 host compatibility", () => {
     ).toBeTruthy();
   });
 
+  it("opens the containing thread for an exact initial event", async () => {
+    const { transport } = createTransport();
+
+    render(
+      <BluplaiChat
+        initialEventId="message-reply"
+        initialRoomId="room-general"
+        transport={transport}
+      />,
+    );
+
+    const thread = await screen.findByRole("complementary", {
+      name: "Thread replies to Launch plan",
+    });
+    const reply = within(thread).getByRole("article", {
+      name: "Message from Daniel",
+    });
+    expect(reply.getAttribute("data-deep-link-target")).toBe("true");
+  });
+
+  it("leaves the timeline unchanged for an unknown initial event", async () => {
+    const { transport } = createTransport();
+
+    render(
+      <BluplaiChat
+        initialEventId="unknown-event"
+        initialRoomId="room-general"
+        transport={transport}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "General" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(document.querySelector('[data-deep-link-target="true"]')).toBeNull();
+  });
+
   it.each([
     "sending",
     "sent",
@@ -1133,7 +1171,6 @@ describe("capability command boundary", () => {
     "workflow.run",
     "project.open",
     "canvas.open",
-    "huddle.start",
     "acp.launch-agent",
   ] as const)("rejects hidden %s commands before transport", async (type) => {
     const { commands, transport } = createTransport();
@@ -1142,6 +1179,35 @@ describe("capability command boundary", () => {
       executeChatCommand(transport, { type }, workspace.capabilities),
     ).rejects.toBeInstanceOf(CapabilityDeniedError);
     expect(commands).toEqual([]);
+  });
+
+  it("permits only huddle.start when its authenticated capability is exact", async () => {
+    const { commands, transport } = createTransport();
+    const command: ChatCommand = {
+      type: "huddle.start",
+      source: { roomId: "room-general", threadRootEventId: null },
+      mode: "orchestrated",
+      recordingRequested: false,
+      retentionDays: 365,
+      participants: [],
+      correlationId: "correlation-1",
+    };
+
+    await expect(
+      executeChatCommand(transport, command, {
+        schemaVersion: 1,
+        readOnly: false,
+        huddleStart: false,
+      }),
+    ).rejects.toBeInstanceOf(CapabilityDeniedError);
+    await expect(
+      executeChatCommand(transport, command, {
+        schemaVersion: 1,
+        readOnly: false,
+        huddleStart: true,
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(commands).toEqual([command]);
   });
 
   it("passes browser chat commands through the same guarded entry point", async () => {
@@ -1172,5 +1238,135 @@ describe("capability command boundary", () => {
       ),
     ).rejects.toBeInstanceOf(ReadOnlySessionError);
     expect(commands).toEqual([]);
+  });
+});
+
+describe("typed agent output rendering", () => {
+  it("renders and replaces accessible output cards while callbacks receive IDs only", () => {
+    const rootMessage = workspace.messages[0];
+    if (!rootMessage) throw new Error("root message fixture missing");
+    const approve = vi.fn();
+    const deny = vi.fn();
+    const cancel = vi.fn();
+    const retry = vi.fn();
+    const message = {
+      ...rootMessage,
+      agentOutputs: [
+        {
+          kind: "progress" as const,
+          id: "11111111-1111-4111-8111-111111111111",
+          replacementKey: "run:11111111-1111-4111-8111-111111111111",
+          runId: "11111111-1111-4111-8111-111111111111",
+          state: "running" as const,
+          label: "Dale is checking project context",
+          canCancel: true,
+        },
+        {
+          kind: "progress" as const,
+          id: "11111111-1111-4111-8111-111111111111",
+          replacementKey: "run:11111111-1111-4111-8111-111111111111",
+          runId: "11111111-1111-4111-8111-111111111111",
+          state: "publishing" as const,
+          label: "Dale is preparing the answer",
+          canCancel: true,
+        },
+        {
+          kind: "approval" as const,
+          id: "22222222-2222-4222-8222-222222222222",
+          replacementKey: "action:22222222-2222-4222-8222-222222222222",
+          runId: "11111111-1111-4111-8111-111111111111",
+          actionId: "22222222-2222-4222-8222-222222222222",
+          state: "pending" as const,
+          label: "Send email",
+          preview: { To: ["megan@example.com"], Subject: "Project update" },
+          canApprove: true,
+        },
+        {
+          kind: "job" as const,
+          id: "33333333-3333-4333-8333-333333333333",
+          replacementKey: "job:33333333-3333-4333-8333-333333333333",
+          runId: "11111111-1111-4111-8111-111111111111",
+          jobId: "33333333-3333-4333-8333-333333333333",
+          state: "running" as const,
+          label: "Generate artifact",
+          percent: 42,
+          canRetry: false,
+        },
+        {
+          kind: "job" as const,
+          id: "55555555-5555-4555-8555-555555555555",
+          replacementKey: "job:55555555-5555-4555-8555-555555555555",
+          runId: "11111111-1111-4111-8111-111111111111",
+          jobId: "55555555-5555-4555-8555-555555555555",
+          state: "failed" as const,
+          label: "Generate image",
+          percent: null,
+          canRetry: true,
+        },
+        {
+          kind: "deep_link" as const,
+          id: "44444444-4444-4444-8444-444444444444",
+          replacementKey: "result:44444444-4444-4444-8444-444444444444",
+          runId: "11111111-1111-4111-8111-111111111111",
+          label: "Open document",
+          href: "/documents?focus=44444444-4444-4444-8444-444444444444",
+        },
+      ],
+    };
+
+    render(
+      <MessageItem
+        message={message}
+        onApproveAction={approve}
+        onCancelRun={cancel}
+        onDenyAction={deny}
+        onRetryJob={retry}
+      />,
+    );
+
+    expect(screen.queryByText("Dale is checking project context")).toBeNull();
+    expect(screen.getByText("Dale is preparing the answer")).not.toBeNull();
+    expect(
+      screen
+        .getByRole("progressbar", { name: "Generate artifact progress" })
+        .getAttribute("aria-valuenow"),
+    ).toBe("42");
+    fireEvent.click(screen.getByRole("button", { name: "Approve Send email" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deny Send email" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Stop Dale is preparing the answer" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry Generate image" }),
+    );
+    expect(approve).toHaveBeenCalledWith(
+      "22222222-2222-4222-8222-222222222222",
+    );
+    expect(deny).toHaveBeenCalledWith("22222222-2222-4222-8222-222222222222");
+    expect(cancel).toHaveBeenCalledWith("11111111-1111-4111-8111-111111111111");
+    expect(retry).toHaveBeenCalledWith("55555555-5555-4555-8555-555555555555");
+    expect(
+      screen.getByRole("link", { name: "Open document" }).getAttribute("href"),
+    ).toBe("/documents?focus=44444444-4444-4444-8444-444444444444");
+  });
+
+  it("keeps raw HTML inert, blocks Markdown images, and rejects unsafe links", () => {
+    const rootMessage = workspace.messages[0];
+    if (!rootMessage) throw new Error("root message fixture missing");
+    render(
+      <MessageItem
+        message={{
+          ...rootMessage,
+          body: '<img src="https://evil.test/a.png"> ![remote](https://evil.test/b.png) [bad](javascript:alert(1)) [safe](https://bluplai.com)',
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole("img", { name: "remote" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "bad" })).toBeNull();
+    expect(
+      screen.getByRole("link", { name: "safe" }).getAttribute("href"),
+    ).toBe("https://bluplai.com");
+    expect(screen.getByText(/<img src=/)).not.toBeNull();
   });
 });

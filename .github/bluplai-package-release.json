@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "release_id": "@bluplai/buzz-chat-react@0.1.0-bluplai.15+7baefe6d194bb792666c8cfabec24fc1410ec289",
+  "source": {
+    "repository": "https://github.com/skyremote/bluplai-buzz",
+    "package_path": "packages/bluplai-chat-react",
+    "package_commit": "7baefe6d194bb792666c8cfabec24fc1410ec289",
+    "package_tree": "0f838c8a632da21bd62e1ad1bb2dffb891ccc2bc",
+    "upstream_repository": "https://github.com/block/buzz",
+    "upstream_commit": "5bf78671f45178f8de02ba18d3d321cbbf19cd1f",
+    "audited_merge_commit": "1f4dd94b31e7e347b82e64756920eb457468f45f",
+    "audited_merge_first_parent": "ce702e152460ad5c4de8a3b10112aa2afe9a96de",
+    "audited_merge_second_parent": "5bf78671f45178f8de02ba18d3d321cbbf19cd1f"
+  },
+  "toolchain": {
+    "node": "24.15.0",
+    "npm": "11.12.1",
+    "pnpm": "11.4.0",
+    "pack_command": "npm pack --pack-destination <directory>"
+  },
+  "package": {
+    "name": "@bluplai/buzz-chat-react",
+    "version": "0.1.0-bluplai.15",
+    "filename": "bluplai-buzz-chat-react-0.1.0-bluplai.15.tgz",
+    "sha256": "7674c3ef087cd3d6fe0ab74e6f15810079d47bcdaeee680e7885dd3491d69227"
+  },
+  "attestation": {
+    "workflow": ".github/workflows/bluplai-package-attestation.yml",
+    "required_ref": "refs/heads/main"
+  },
+  "release_policy": {
+    "landing_history": "ancestry_preserving",
+    "prohibited_landing_modes": ["squash", "rebase", "cherry-pick"],
+    "host_upload_requires_live_github_attestation": true,
+    "live_attestation_subjects": [
+      "package_tarball",
+      ".github/bluplai-package-release.json"
+    ],
+    "required_digest_identity": ["source_digest", "signer_digest"]
+  }
+}

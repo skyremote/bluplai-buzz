@@ -58,13 +58,38 @@ function isGifUrl(value: string): boolean {
   }
 }
 
+function safeExternalHref(value: string | undefined): string | null {
+  const hasControl = [...(value ?? "")].some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127;
+  });
+  if (!value || value.startsWith("//") || value.includes("\\") || hasControl)
+    return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" ||
+      url.protocol === "https:" ||
+      url.protocol === "mailto:"
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function markdownComponents(mentionNames: string[]): Components {
   return {
-    a: ({ children, ...props }) => (
-      <a {...props} rel="noopener noreferrer" target="_blank">
-        {children}
-      </a>
-    ),
+    a: ({ children, href, ...props }) => {
+      const safeHref = safeExternalHref(href);
+      return safeHref ? (
+        <a {...props} href={safeHref} rel="noopener noreferrer" target="_blank">
+          {children}
+        </a>
+      ) : (
+        <span>{children}</span>
+      );
+    },
+    img: ({ alt }) => <span>{alt ? `[Image: ${alt}]` : "[Image]"}</span>,
     blockquote: ({ children, ...props }) => (
       <blockquote {...props}>
         {renderMentions(children, mentionNames)}

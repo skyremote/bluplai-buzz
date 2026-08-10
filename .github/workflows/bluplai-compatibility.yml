@@ -3,16 +3,28 @@ name: Bluplai browser compatibility
 on:
   pull_request:
     paths:
-      - ".github/workflows/bluplai-compatibility.yml"
+      - ".github/workflows/**"
+      - ".github/bluplai-package-release.json"
+      - "UPSTREAM_BASE"
+      - "docs/UPSTREAM_ADOPTION.md"
       - "packages/bluplai-chat-react/**"
+      - "scripts/test-bluplai-package-release-contract.mjs"
+      - "scripts/verify-bluplai-live-attestations.mjs"
+      - "scripts/verify-bluplai-package-release.mjs"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
   push:
     branches: [main]
     paths:
-      - ".github/workflows/bluplai-compatibility.yml"
+      - ".github/workflows/**"
+      - ".github/bluplai-package-release.json"
+      - "UPSTREAM_BASE"
+      - "docs/UPSTREAM_ADOPTION.md"
       - "packages/bluplai-chat-react/**"
+      - "scripts/test-bluplai-package-release-contract.mjs"
+      - "scripts/verify-bluplai-live-attestations.mjs"
+      - "scripts/verify-bluplai-package-release.mjs"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -25,17 +37,27 @@ concurrency:
 permissions: {}
 
 jobs:
-  react-18-host:
-    name: React 18 browser package
+  package-candidate:
+    name: React 18 package candidate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
       - name: Checkout pinned source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Activate pinned toolchain
         uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      - name: Verify package release workflow contracts
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(npm --version)" = "11.12.1"
+          test "$(pnpm --version)" = "11.4.0"
+          node --test scripts/test-bluplai-package-release-contract.mjs
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
       - name: Check browser and type boundaries
@@ -44,15 +66,92 @@ jobs:
         run: pnpm --filter @bluplai/buzz-chat-react test
       - name: Build production package
         run: pnpm --filter @bluplai/buzz-chat-react build
-      - name: Pack commit-addressed prerelease
+      - name: Reproducibly pack exact candidate
+        id: candidate
+        shell: bash
+        working-directory: packages/bluplai-chat-react
         run: |
-          mkdir -p "$RUNNER_TEMP/bluplai-chat-package"
-          pnpm --filter @bluplai/buzz-chat-react pack \
-            --pack-destination "$RUNNER_TEMP/bluplai-chat-package"
-      - name: Upload immutable host-test artifact
+          set -euo pipefail
+          first_dir="$RUNNER_TEMP/bluplai-chat-package-first"
+          second_dir="$RUNNER_TEMP/bluplai-chat-package-second"
+          mkdir -p "$first_dir" "$second_dir"
+          npm pack --pack-destination "$first_dir"
+          npm pack --pack-destination "$second_dir"
+          first_tarball="$first_dir/$(node -p "const p=require('./package.json'); p.name.replace('@','').replace('/','-')+'-'+p.version+'.tgz'")"
+          second_tarball="$second_dir/$(basename "$first_tarball")"
+          test -f "$first_tarball"
+          test -f "$second_tarball"
+          cmp "$first_tarball" "$second_tarball"
+          node "$GITHUB_WORKSPACE/scripts/verify-bluplai-package-release.mjs" \
+            --manifest "$GITHUB_WORKSPACE/.github/bluplai-package-release.json" \
+            --repository "$GITHUB_WORKSPACE" \
+            --tarball "$first_tarball"
+
+          upstream_sha="$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/UPSTREAM_BASE")"
+          fork_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+          package_version="$(node -p "require('./package.json').version")"
+          tarball_sha256="$(sha256sum "$first_tarball" | awk '{print $1}')"
+          git -C "$GITHUB_WORKSPACE" cat-file -e "${upstream_sha}^{commit}"
+
+          audited_merge_sha="$(git -C "$GITHUB_WORKSPACE" log -1 --format='%H' -- UPSTREAM_BASE)"
+          audited_first_parent_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse "${audited_merge_sha}^1")"
+          audited_second_parent_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse "${audited_merge_sha}^2")"
+          recorded_base="$(git -C "$GITHUB_WORKSPACE" show "${audited_merge_sha}:UPSTREAM_BASE" | tr -d '[:space:]')"
+          test "$recorded_base" = "$upstream_sha"
+          test "$audited_second_parent_sha" = "$upstream_sha"
+          if [ "$fork_sha" = "$audited_merge_sha" ]; then
+            test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD^2)" = "$upstream_sha"
+          fi
+          git -C "$GITHUB_WORKSPACE" merge-base --is-ancestor "$upstream_sha" "$fork_sha"
+          git -C "$GITHUB_WORKSPACE" merge-base --is-ancestor "$audited_merge_sha" "$fork_sha"
+
+          jq -n \
+            --arg upstream_sha "$upstream_sha" \
+            --arg fork_sha "$fork_sha" \
+            --arg audited_merge_sha "$audited_merge_sha" \
+            --arg audited_first_parent_sha "$audited_first_parent_sha" \
+            --arg audited_second_parent_sha "$audited_second_parent_sha" \
+            --arg package_version "$package_version" \
+            --arg tarball "$(basename "$first_tarball")" \
+            --arg tarball_sha256 "$tarball_sha256" \
+            '{
+              schema_version: 1,
+              upstream: {repository: "https://github.com/block/buzz", sha: $upstream_sha},
+              fork: {
+                repository: "https://github.com/skyremote/bluplai-buzz",
+                sha: $fork_sha,
+                audited_merge_sha: $audited_merge_sha,
+                first_parent_sha: $audited_first_parent_sha,
+                second_parent_sha: $audited_second_parent_sha
+              },
+              package: {
+                name: "@bluplai/buzz-chat-react",
+                version: $package_version,
+                tarball: $tarball,
+                sha256: $tarball_sha256
+              }
+            }' > "$RUNNER_TEMP/package-provenance.json"
+
+          {
+            echo "### Bluplai package candidate"
+            echo
+            echo "- Upstream SHA: \`$upstream_sha\`"
+            echo "- Fork SHA: \`$fork_sha\`"
+            echo "- Package version: \`$package_version\`"
+            echo "- Tarball SHA-256: \`$tarball_sha256\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "upstream_sha=$upstream_sha" >> "$GITHUB_OUTPUT"
+          echo "fork_sha=$fork_sha" >> "$GITHUB_OUTPUT"
+          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
+          echo "tarball=$first_tarball" >> "$GITHUB_OUTPUT"
+          echo "tarball_sha256=$tarball_sha256" >> "$GITHUB_OUTPUT"
+      - name: Upload immutable package and provenance
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: bluplai-buzz-chat-react-${{ github.sha }}
-          path: ${{ runner.temp }}/bluplai-chat-package/*.tgz
+          name: bluplai-buzz-chat-react-${{ steps.candidate.outputs.fork_sha }}
+          path: |
+            ${{ steps.candidate.outputs.tarball }}
+            ${{ runner.temp }}/package-provenance.json
           if-no-files-found: error
           retention-days: 30
