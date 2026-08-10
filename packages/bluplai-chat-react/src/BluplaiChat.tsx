@@ -29,6 +29,8 @@ export interface BluplaiChatProps {
   transport: BuzzChatTransport;
   className?: string;
   initialRoomId?: string;
+  /** Exact trusted event/message to reveal after the initial room loads. */
+  initialEventId?: string;
   mode?: "workspace" | "rail";
   compact?: boolean;
   showRoomList?: boolean;
@@ -142,6 +144,7 @@ export function BluplaiChat({
   transport,
   className,
   initialRoomId,
+  initialEventId,
   mode = "workspace",
   compact = false,
   showRoomList = true,
@@ -171,6 +174,7 @@ export function BluplaiChat({
     retainedSnapshot ? resolveRoomId(retainedSnapshot, initialRoomId) : null,
   );
   const [threadRoot, setThreadRoot] = useState<ChatMessage | null>(null);
+  const [deepLinkTargetId, setDeepLinkTargetId] = useState<string | null>(null);
   const [threadWidth, setThreadWidth] = useState(storedThreadWidth);
   const [threadExpanded, setThreadExpanded] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -200,6 +204,9 @@ export function BluplaiChat({
   const resizeStart = useRef<{ x: number; width: number } | null>(null);
   const lastMarkedRead = useRef<string | null>(null);
   const messageStream = useRef<HTMLDivElement | null>(null);
+  const workspaceRoot = useRef<HTMLElement | null>(null);
+  const handledInitialEventId = useRef<string | null>(null);
+  const focusedDeepLinkId = useRef<string | null>(null);
   const messageViewport = useRef<{
     roomId: string | null;
     latestMessageId: string | null;
@@ -284,6 +291,34 @@ export function BluplaiChat({
     );
     return { room, messages, roots, repliesByRoot, readState, members };
   }, [selectedRoomId, workspace]);
+
+  useEffect(() => {
+    if (!initialEventId) {
+      handledInitialEventId.current = null;
+      focusedDeepLinkId.current = null;
+      setDeepLinkTargetId(null);
+      return;
+    }
+    if (!projection || handledInitialEventId.current === initialEventId) {
+      return;
+    }
+    const target = projection.messages.find(
+      (message) => message.id === initialEventId,
+    );
+    if (!target) return;
+    if (target.threadRootId) {
+      const root = projection.messages.find(
+        (message) => message.id === target.threadRootId,
+      );
+      if (!root) return;
+      setThreadRoot(root);
+    } else {
+      setThreadRoot(null);
+    }
+    handledInitialEventId.current = initialEventId;
+    focusedDeepLinkId.current = null;
+    setDeepLinkTargetId(initialEventId);
+  }, [initialEventId, projection]);
   const mentionProjects = useMemo<ChatProjectReference[]>(() => {
     if (workspace.status !== "ready") return [];
     const byId = new Map<string, ChatProjectReference>();
@@ -369,6 +404,21 @@ export function BluplaiChat({
         stream.scrollHeight - stream.scrollTop - stream.clientHeight <= 48,
     };
   }, [projection]);
+
+  useLayoutEffect(() => {
+    if (!deepLinkTargetId || focusedDeepLinkId.current === deepLinkTargetId) {
+      return;
+    }
+    const target = [
+      ...(workspaceRoot.current?.querySelectorAll<HTMLElement>(
+        "[data-message-id]",
+      ) ?? []),
+    ].find((element) => element.dataset.messageId === deepLinkTargetId);
+    if (!target) return;
+    target.scrollIntoView?.({ block: "center" });
+    target.focus({ preventScroll: true });
+    focusedDeepLinkId.current = deepLinkTargetId;
+  }, [deepLinkTargetId]);
 
   useEffect(() => {
     const search = transport.searchMessages?.bind(transport);
@@ -552,6 +602,7 @@ export function BluplaiChat({
       ]
         .filter(Boolean)
         .join(" ")}
+      ref={workspaceRoot}
     >
       {mode === "rail" ? (
         <header className="bluplai-chat__brand">
@@ -782,6 +833,7 @@ export function BluplaiChat({
                 {projection.roots.map((message) => (
                   <MessageItem
                     compact={compact}
+                    deepLinkTarget={message.id === deepLinkTargetId}
                     key={message.id}
                     message={message}
                     mentionNames={[
@@ -935,6 +987,7 @@ export function BluplaiChat({
               >
                 <MessageItem
                   compact
+                  deepLinkTarget={threadRoot.id === deepLinkTargetId}
                   message={threadRoot}
                   mentionNames={[
                     ...projection.members.map((member) => member.displayName),
@@ -949,6 +1002,7 @@ export function BluplaiChat({
                 {threadReplies.map((reply) => (
                   <MessageItem
                     compact
+                    deepLinkTarget={reply.id === deepLinkTargetId}
                     key={reply.id}
                     message={reply}
                     mentionNames={[

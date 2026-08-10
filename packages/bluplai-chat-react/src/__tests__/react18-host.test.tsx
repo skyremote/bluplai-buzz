@@ -313,6 +313,44 @@ describe("React 18 host compatibility", () => {
     ).toBeTruthy();
   });
 
+  it("opens the containing thread for an exact initial event", async () => {
+    const { transport } = createTransport();
+
+    render(
+      <BluplaiChat
+        initialEventId="message-reply"
+        initialRoomId="room-general"
+        transport={transport}
+      />,
+    );
+
+    const thread = await screen.findByRole("complementary", {
+      name: "Thread replies to Launch plan",
+    });
+    const reply = within(thread).getByRole("article", {
+      name: "Message from Daniel",
+    });
+    expect(reply.getAttribute("data-deep-link-target")).toBe("true");
+  });
+
+  it("leaves the timeline unchanged for an unknown initial event", async () => {
+    const { transport } = createTransport();
+
+    render(
+      <BluplaiChat
+        initialEventId="unknown-event"
+        initialRoomId="room-general"
+        transport={transport}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "General" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(document.querySelector('[data-deep-link-target="true"]')).toBeNull();
+  });
+
   it.each([
     "sending",
     "sent",

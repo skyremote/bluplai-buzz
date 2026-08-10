@@ -211,6 +211,7 @@ export interface MessageItemProps {
   message: ChatMessage;
   readState?: ChatReadState;
   compact?: boolean;
+  deepLinkTarget?: boolean;
   threadReplyCount?: number;
   mentionNames?: string[];
   onReact?: (message: ChatMessage, emoji: string) => void;
@@ -225,6 +226,7 @@ export function MessageItem({
   message,
   readState,
   compact,
+  deepLinkTarget = false,
   threadReplyCount = 0,
   mentionNames,
   onReact,
@@ -253,6 +255,9 @@ export function MessageItem({
       ]
         .filter(Boolean)
         .join(" ")}
+      data-deep-link-target={deepLinkTarget || undefined}
+      data-message-id={message.id}
+      tabIndex={deepLinkTarget ? -1 : undefined}
     >
       <div className="bluplai-chat__avatar" aria-hidden="true">
         {message.author.avatarUrl ? (

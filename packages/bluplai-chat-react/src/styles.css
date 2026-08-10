@@ -816,6 +816,12 @@
   background: hsl(var(--muted, 220 18% 96%) / 0.42);
 }
 
+.bluplai-chat__message[data-deep-link-target="true"] {
+  background: hsl(var(--primary, 221 83% 53%) / 0.1);
+  box-shadow: inset 3px 0 hsl(var(--primary, 221 83% 53%));
+  outline: none;
+}
+
 .bluplai-chat__message--compact {
   gap: 9px;
   grid-template-columns: 30px minmax(0, 1fr);
